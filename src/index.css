@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+@import 'katex/dist/katex.min.css';
+
+/*
+ * Dark technical palette. Every colour is defined once here as a token so a future light theme is a
+ * second token block rather than a rewrite of every component.
+ */
+@theme {
+  --color-ground: #0b1120;
+  --color-surface: #111a2e;
+  --color-surface-2: #172140;
+  --color-line: #24304d;
+  --color-line-bright: #35456b;
+
+  --color-ink: #e6edf7;
+  --color-ink-dim: #9fb0cc;
+  --color-ink-faint: #6b7d9c;
+
+  --color-cyan: #22d3ee;
+  --color-cyan-dim: #0e7490;
+  --color-violet: #a78bfa;
+  --color-violet-dim: #6d47d9;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+  --color-emerald: #34d399;
+
+  --font-mono:
+    'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Anchored section headings shouldn't hide under the sticky header. */
+:target {
+  scroll-margin-top: 5rem;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-cyan) 35%, transparent);
+}
+
+/* Scrollbars, so the circuit's horizontal scroller doesn't look like an afterthought. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-bright) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-bright);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* KaTeX inherits our type colour and sits at a comfortable size against body text. */
+.katex {
+  color: var(--color-ink);
+  font-size: 1.05em;
+}
+.katex-display {
+  margin: 1.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+}
+
+/* Prevent the drag interaction from selecting text across the circuit grid. */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
