@@ -8,6 +8,7 @@
 import type { Topic, Track } from './types'
 import { MATH_TOPICS } from './math'
 import { THEORY_TOPICS } from './theory'
+import { ALGORITHM_TOPICS } from './algorithms'
 
 export const TRACKS: Track[] = [
   {
@@ -23,6 +24,13 @@ export const TRACKS: Track[] = [
     blurb:
       'Dirac notation, the Bloch sphere, gates, tensor products, entanglement and measurement.',
     topics: THEORY_TOPICS,
+  },
+  {
+    id: 'algorithms',
+    title: 'Algorithms',
+    blurb:
+      'Twelve algorithms in teaching order, each introducing one new mechanism and building only on the ones before it. Every page carries a working circuit you can open and run.',
+    topics: ALGORITHM_TOPICS,
   },
 ]
 

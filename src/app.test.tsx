@@ -43,14 +43,21 @@ describe('routes', () => {
     expect(screen.getByText('Eigenvalues & Eigenvectors')).toBeDefined()
   })
 
-  it('renders a topic page with its sections and marks the unwritten ones', () => {
+  it('renders a topic page with all of its sections written', () => {
     renderAt('/math/complex-numbers')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Complex Numbers')
 
-    // The one worked section renders real content...
     expect(screen.getByRole('heading', { name: /Why Quantum Mechanics Needs Complex Numbers/i })).toBeDefined()
-    // ...and the stubs are visibly marked rather than silently empty.
-    expect(screen.getAllByText(/^Placeholder$/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: /Roots of Unity/i })).toBeDefined()
+    // Nothing on this page is a stub any more.
+    expect(screen.queryAllByText(/^Placeholder$/)).toHaveLength(0)
+  })
+
+  it('still marks a stub clearly if one is ever added back', () => {
+    // The PlaceholderBlock is what makes unwritten content impossible to ship by accident, so it
+    // is worth keeping covered even while every section happens to be written.
+    renderAt('/math/complex-numbers')
+    expect(screen.queryAllByText(/^Placeholder$/)).toHaveLength(0)
   })
 
   it('renders LaTeX through KaTeX', () => {
@@ -63,10 +70,33 @@ describe('routes', () => {
     expect(screen.getByRole('link', { name: /Qubits & the Bloch Sphere/ })).toBeDefined()
   })
 
-  it('renders the algorithms placeholder without pretending to work', () => {
+  it('renders the algorithms track index in teaching order', () => {
     renderAt('/algorithms')
-    expect(screen.getByText(/not built yet/i)).toBeDefined()
-    expect(screen.getByText(/Decisions still needed/i)).toBeDefined()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Algorithms')
+
+    const links = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
+    const algorithmLinks = links.filter((h) => h?.startsWith('/algorithms/'))
+    expect(algorithmLinks).toHaveLength(12)
+    // Order matters: each algorithm builds only on the ones before it.
+    expect(algorithmLinks[0]).toBe('/algorithms/quantum-random-numbers')
+    expect(algorithmLinks[11]).toBe('/algorithms/shors-algorithm')
+  })
+
+  it('renders an algorithm page with its worked circuit', () => {
+    renderAt('/algorithms/grovers-search')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Grover')
+
+    // The embedded circuit renders and offers a handoff into the lab.
+    const open = screen.getByRole('link', { name: /Open in Circuit Lab/i })
+    expect(open).toHaveAttribute('href', '/circuit?preset=grover')
+  })
+
+  it('has no unwritten sections left in the algorithms track', () => {
+    for (const slug of ['deutsch', 'simon', 'shors-algorithm']) {
+      const { unmount } = renderAt(`/algorithms/${slug}`)
+      expect(screen.queryAllByText(/^Placeholder$/)).toHaveLength(0)
+      unmount()
+    }
   })
 
   it('shows a 404 for an unknown topic slug', () => {
@@ -563,5 +593,39 @@ describe('non-adjacent two-qubit gates', () => {
       expect.stringContaining('border-cyan'),
     )
     expect(screen.queryByText(/cannot be used twice/i)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Lesson → Circuit Lab handoff
+// ---------------------------------------------------------------------------
+
+describe('loading a worked circuit from a lesson', () => {
+  it('loads the named preset onto the board', () => {
+    renderAt('/circuit?preset=bell')
+
+    // The Bell circuit ran: two qubits, (|00⟩ + |11⟩)/√2.
+    expect(screen.getAllByText('|00⟩').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('|11⟩').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('50.0%')).toHaveLength(2)
+    expect(screen.getByText(/Loaded .Bell State Preparation./)).toBeDefined()
+  })
+
+  it('carries the preset’s custom inputs across', () => {
+    // Deutsch starts its ancilla in |1⟩, which the handoff must preserve.
+    renderAt('/circuit?preset=deutsch')
+    expect(screen.getByText(/^Inputs:$/)).toBeDefined()
+    expect(screen.getByText(/q1=\|1⟩/)).toBeDefined()
+  })
+
+  it('is undoable, so it cannot silently destroy the reader’s own circuit', () => {
+    renderAt('/circuit?preset=grover')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+  })
+
+  it('ignores an unknown preset rather than breaking the page', () => {
+    renderAt('/circuit?preset=not-a-real-algorithm')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Circuit Lab')
+    expect(screen.getAllByText('|000⟩').length).toBeGreaterThan(0)
   })
 })

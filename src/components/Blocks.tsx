@@ -1,4 +1,5 @@
 import type { Block } from '../content/types'
+import { CircuitPreview } from './CircuitPreview'
 import { WIDGETS } from '../content/widgets'
 import { RichText, Tex } from './Tex'
 
@@ -75,6 +76,18 @@ function BlockView({ block }: { block: Block }) {
         </aside>
       )
     }
+
+    case 'circuit':
+      return (
+        <figure className="my-5">
+          <CircuitPreview presetId={block.preset} />
+          {block.caption && (
+            <figcaption className="mt-2 text-center text-xs text-ink-faint">
+              <RichText text={block.caption} />
+            </figcaption>
+          )}
+        </figure>
+      )
 
     case 'widget': {
       const Widget = WIDGETS[block.widget]

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   MAX_COLUMNS,
@@ -16,6 +17,7 @@ import {
 } from '../lib/quantum/circuit'
 import { simulate, stepCount } from '../lib/quantum/simulate'
 import { circuitToJson, deserialiseCircuit } from '../lib/quantum/persist'
+import { getPreset } from '../lib/quantum/presets'
 import type { CustomGate } from '../lib/quantum/gates'
 
 import { CircuitGrid } from './CircuitGrid'
@@ -44,6 +46,7 @@ export function CircuitBoard() {
   const store = useCircuitStore()
   const { circuit } = store
 
+  const [searchParams, setSearchParams] = useSearchParams()
   const svgRef = useRef<SVGSVGElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -69,6 +72,25 @@ export function CircuitBoard() {
   useEffect(() => {
     setInspectStep((s) => Math.min(s, circuit.columns))
   }, [circuit.columns])
+
+  /**
+   * Load a worked circuit arriving as ?preset=<id> from a lesson page.
+   *
+   * This overwrites whatever was on the board, so it goes through the normal undoable commit and
+   * says so — one Ctrl+Z brings the previous circuit back. The query parameter is then cleared so
+   * a later reload does not silently replace the reader's own edits with the preset again.
+   */
+  const presetId = searchParams.get('preset')
+  useEffect(() => {
+    if (!presetId) return
+    const found = getPreset(presetId)
+    setSearchParams({}, { replace: true })
+    if (!found) return
+    store.replaceCircuit(found.circuit, `Loaded “${found.name}”. Undo restores your own circuit.`)
+    setSelectedId(undefined)
+    setInspectStep(found.circuit.columns)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run only when the parameter changes
+  }, [presetId])
 
   // ---------------------------------------------------------------- dragging
 

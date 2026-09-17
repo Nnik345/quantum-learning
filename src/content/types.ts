@@ -17,6 +17,9 @@ export type Block =
   | { kind: 'list'; ordered?: boolean; items: string[] }
   | { kind: 'callout'; tone?: 'note' | 'tip' | 'warn'; title?: string; text: string }
   | { kind: 'widget'; widget: WidgetKey; caption?: string }
+  /** A worked circuit, by preset id from lib/quantum/presets.ts. Renders read-only with a
+   *  link that loads it into the Circuit Lab. */
+  | { kind: 'circuit'; preset: string; caption?: string }
 
 export type SectionStatus = 'placeholder' | 'draft' | 'done'
 
@@ -41,8 +44,8 @@ export interface Topic {
 }
 
 export interface Track {
-  /** URL segment: /math or /theory. */
-  id: 'math' | 'theory'
+  /** URL segment: /math, /theory or /algorithms. */
+  id: 'math' | 'theory' | 'algorithms'
   title: string
   blurb: string
   topics: Topic[]

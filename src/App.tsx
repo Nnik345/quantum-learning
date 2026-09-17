@@ -5,7 +5,6 @@ import { Header } from './components/layout/Header'
 import { Home } from './routes/Home'
 import { TrackIndex } from './routes/TrackIndex'
 import { TopicPage } from './routes/TopicPage'
-import { AlgorithmsPage } from './routes/AlgorithmsPage'
 import { CircuitBoard } from './circuit/CircuitBoard'
 
 export default function App() {
@@ -17,7 +16,6 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/circuit" element={<CircuitBoard />} />
-          <Route path="/algorithms" element={<AlgorithmsPage />} />
           <Route path="/:trackId" element={<TrackIndex />} />
           <Route path="/:trackId/:slug" element={<TopicPage />} />
           <Route path="*" element={<NotFound />} />
