@@ -5,7 +5,7 @@ import { getTopic } from '../content/registry'
 import { DEFAULT_MODEL } from '../lib/llm/client'
 import { useAssistant } from './useAssistant'
 import { MessageView } from './MessageView'
-import { usePanelSize } from './usePanelSize'
+import { usePanelSize, type ResizeEdge } from './usePanelSize'
 
 const STATUS_LABEL: Record<string, string> = {
   thinking: 'Thinking…',
@@ -92,27 +92,12 @@ export function AssistantPanel() {
       ].join(' ')}
     >
       {panel.isDesktop && (
-        <div
-          role="separator"
-          aria-label="Resize the tutor. Drag, or use the arrow keys."
-          aria-orientation="vertical"
-          tabIndex={0}
-          onPointerDown={panel.startResize}
-          onKeyDown={panel.nudge}
-          onDoubleClick={panel.reset}
-          title={
-            panel.isDefaultSize
-              ? 'Drag to enlarge — double-click to reset'
-              : `${panel.size.width} × ${panel.size.height} — double-click to reset`
-          }
-          className="absolute -left-1 -top-1 z-10 size-5 cursor-nwse-resize rounded-tl-xl focus:outline-none"
-        >
-          {/* Two short strokes reading as a corner grip, brightening on hover and focus. */}
-          <svg viewBox="0 0 20 20" className="size-full text-line-bright hover:text-cyan" aria-hidden>
-            <path d="M4 13 L4 4 L13 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            <path d="M8 16 L8 8 L16 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
-          </svg>
-        </div>
+        <>
+          {/* Edges first, corner last: the corner sits on top where they overlap. */}
+          <ResizeHandle panel={panel} edge="top" />
+          <ResizeHandle panel={panel} edge="left" />
+          <ResizeHandle panel={panel} edge="corner" />
+        </>
       )}
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="text-sm font-medium text-ink">Tutor</span>
@@ -230,6 +215,83 @@ export function AssistantPanel() {
           the lesson pages.
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * One resize handle: the top edge, the left edge, or the corner that does both.
+ *
+ * The strip straddles the border — half outside the panel, half over it — so there is a grabbable
+ * target without a visible gutter eating into the layout. Nothing is drawn until hover or focus,
+ * which keeps three handles from cluttering a panel whose job is reading.
+ */
+function ResizeHandle({
+  panel,
+  edge,
+}: {
+  panel: ReturnType<typeof usePanelSize>
+  edge: ResizeEdge
+}) {
+  const size = `${panel.size.width} × ${panel.size.height}`
+  const config = {
+    top: {
+      label: 'Resize the tutor height. Drag, or use the up and down arrow keys.',
+      orientation: 'horizontal' as const,
+      hint: 'Drag up to make the tutor taller',
+      box: 'inset-x-0 -top-1 h-2 cursor-ns-resize',
+      line: 'inset-x-3 top-1/2 h-0.5 -translate-y-1/2',
+    },
+    left: {
+      label: 'Resize the tutor width. Drag, or use the left and right arrow keys.',
+      orientation: 'vertical' as const,
+      hint: 'Drag left to make the tutor wider',
+      box: 'inset-y-0 -left-1 w-2 cursor-ew-resize',
+      line: 'inset-y-3 left-1/2 w-0.5 -translate-x-1/2',
+    },
+    corner: {
+      label: 'Resize the tutor from the corner. Drag, or use the arrow keys.',
+      orientation: 'vertical' as const,
+      hint: 'Drag to resize both directions',
+      box: '-left-1 -top-1 size-5 cursor-nwse-resize rounded-tl-xl',
+      line: '',
+    },
+  }[edge]
+
+  return (
+    <div
+      role="separator"
+      aria-label={config.label}
+      aria-orientation={config.orientation}
+      tabIndex={0}
+      onPointerDown={(event) => panel.startResize(event, edge)}
+      onKeyDown={(event) => panel.nudge(event, edge)}
+      onDoubleClick={panel.reset}
+      title={
+        panel.isDefaultSize ? `${config.hint} — double-click to reset` : `${size} — double-click to reset`
+      }
+      className={[
+        'group absolute z-10 touch-none focus:outline-none',
+        edge === 'corner' ? 'z-20' : '',
+        config.box,
+      ].join(' ')}
+    >
+      {edge === 'corner' ? (
+        /* Two short strokes reading as a corner grip, brightening on hover and focus. */
+        <svg viewBox="0 0 20 20" className="size-full text-line-bright hover:text-cyan group-focus-visible:text-cyan" aria-hidden>
+          <path d="M4 13 L4 4 L13 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M8 16 L8 8 L16 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
+        </svg>
+      ) : (
+        <span
+          aria-hidden
+          className={[
+            'absolute rounded-full bg-transparent transition-colors',
+            'group-hover:bg-cyan/60 group-focus-visible:bg-cyan',
+            config.line,
+          ].join(' ')}
+        />
+      )}
     </div>
   )
 }

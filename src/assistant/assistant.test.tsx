@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 import type { ChatChunk, ChatRequest } from '../lib/llm/types'
@@ -326,8 +326,11 @@ describe('the rest of the site is unaffected', () => {
 // ---------------------------------------------------------------------------
 // Resizing
 //
-// The panel is pinned bottom-right, so it grows up and to the left. That is why the handle sits at
-// the top-left corner: a bottom-right grip would try to drag the panel off-screen.
+// The panel is pinned bottom-right, so it grows up and to the left. That is why the handles sit on
+// the top and left sides: a bottom-right grip would try to drag the panel off-screen.
+//
+// Three handles — top edge for height, left edge for width, corner for both. The edge cases below
+// exist because a handle resizing an axis it does not own is the bug worth guarding against.
 // ---------------------------------------------------------------------------
 
 const { MIN_WIDTH, MIN_HEIGHT, PANEL_SIZE_KEY } = await import('./usePanelSize')
@@ -347,7 +350,9 @@ function setViewport(desktop: boolean, width = 1440, height = 900) {
   })
 }
 
-const grip = () => screen.getByRole('separator', { name: /resize the tutor/i })
+const corner = () => screen.getByRole('separator', { name: /from the corner/i })
+const topEdge = () => screen.getByRole('separator', { name: /tutor height/i })
+const leftEdge = () => screen.getByRole('separator', { name: /tutor width/i })
 const panelBox = (container: HTMLElement) =>
   container.querySelector('[style*="width"]') as HTMLElement | null
 
@@ -369,7 +374,12 @@ const drag = (el: HTMLElement, dx: number, dy: number) => {
 }
 
 describe('resizing the panel', () => {
-  beforeEach(() => setViewport(true))
+  beforeEach(() => {
+    setViewport(true)
+    // A remembered size is the feature, so without this each test inherits the last one's drag and
+    // the suite only passes in the order it happens to run in.
+    window.localStorage.removeItem(PANEL_SIZE_KEY)
+  })
 
   it('starts at the shipped size', () => {
     const { container } = renderPanel()
@@ -382,7 +392,7 @@ describe('resizing the panel', () => {
   it('grows when dragged up and to the left', () => {
     const { container } = renderPanel()
     open()
-    drag(grip(), -160, -100)
+    drag(corner(), -160, -100)
 
     const box = panelBox(container)!
     expect(box.style.width).toBe(`${MIN_WIDTH + 160}px`)
@@ -393,7 +403,7 @@ describe('resizing the panel', () => {
     const { container } = renderPanel()
     open()
     // Dragging the other way would shrink it; the floor holds.
-    drag(grip(), 300, 300)
+    drag(corner(), 300, 300)
 
     const box = panelBox(container)!
     expect(box.style.width).toBe(`${MIN_WIDTH}px`)
@@ -404,7 +414,7 @@ describe('resizing the panel', () => {
     setViewport(true, 800, 700)
     const { container } = renderPanel()
     open()
-    drag(grip(), -5000, -5000)
+    drag(corner(), -5000, -5000)
 
     const box = panelBox(container)!
     expect(Number.parseInt(box.style.width)).toBeLessThanOrEqual(800)
@@ -414,7 +424,7 @@ describe('resizing the panel', () => {
   it('resizes with the arrow keys, for anyone not using a pointer', () => {
     const { container } = renderPanel()
     open()
-    fireEvent.keyDown(grip(), { key: 'ArrowLeft' })
+    fireEvent.keyDown(corner(), { key: 'ArrowLeft' })
 
     expect(Number.parseInt(panelBox(container)!.style.width)).toBeGreaterThan(MIN_WIDTH)
   })
@@ -422,17 +432,17 @@ describe('resizing the panel', () => {
   it('resets on double-click', () => {
     const { container } = renderPanel()
     open()
-    drag(grip(), -200, -200)
+    drag(corner(), -200, -200)
     expect(Number.parseInt(panelBox(container)!.style.width)).toBeGreaterThan(MIN_WIDTH)
 
-    fireEvent.doubleClick(grip())
+    fireEvent.doubleClick(corner())
     expect(panelBox(container)!.style.width).toBe(`${MIN_WIDTH}px`)
   })
 
   it('remembers the size across visits', () => {
     const first = renderPanel()
     open()
-    drag(grip(), -120, -80)
+    drag(corner(), -120, -80)
     first.unmount()
 
     const second = renderPanel()
@@ -458,7 +468,59 @@ describe('resizing the panel', () => {
     expect(panelBox(container)!.style.width).toBe(`${MIN_WIDTH}px`)
   })
 
-  it('offers no handle on a phone, where the panel is full-screen', () => {
+  it('changes only the height when the top edge is dragged', () => {
+    const { container } = renderPanel()
+    open()
+    // Dragging diagonally: the horizontal component must be ignored by this handle.
+    drag(topEdge(), -160, -100)
+
+    const box = panelBox(container)!
+    expect(box.style.height).toBe(`${MIN_HEIGHT + 100}px`)
+    expect(box.style.width).toBe(`${MIN_WIDTH}px`)
+  })
+
+  it('changes only the width when the left edge is dragged', () => {
+    const { container } = renderPanel()
+    open()
+    drag(leftEdge(), -160, -100)
+
+    const box = panelBox(container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH + 160}px`)
+    expect(box.style.height).toBe(`${MIN_HEIGHT}px`)
+  })
+
+  it('gives each edge only the arrow keys for its own axis', () => {
+    const { container } = renderPanel()
+    open()
+
+    // The left edge answers to ArrowLeft and ignores ArrowUp.
+    fireEvent.keyDown(leftEdge(), { key: 'ArrowLeft' })
+    expect(Number.parseInt(panelBox(container)!.style.width)).toBeGreaterThan(MIN_WIDTH)
+    fireEvent.keyDown(leftEdge(), { key: 'ArrowUp' })
+    expect(panelBox(container)!.style.height).toBe(`${MIN_HEIGHT}px`)
+
+    // And the top edge the other way round.
+    fireEvent.keyDown(topEdge(), { key: 'ArrowUp' })
+    expect(Number.parseInt(panelBox(container)!.style.height)).toBeGreaterThan(MIN_HEIGHT)
+  })
+
+  it('holds the floor on each edge independently', () => {
+    const { container } = renderPanel()
+    open()
+    drag(topEdge(), 0, 400)
+    drag(leftEdge(), 400, 0)
+
+    const box = panelBox(container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH}px`)
+    expect(box.style.height).toBe(`${MIN_HEIGHT}px`)
+  })
+
+  it('offers all three handles on a desktop, and none on a phone', () => {
+    renderPanel()
+    open()
+    expect(screen.getAllByRole('separator', { name: /resize the tutor/i })).toHaveLength(3)
+
+    cleanup()
     setViewport(false)
     renderPanel()
     open()

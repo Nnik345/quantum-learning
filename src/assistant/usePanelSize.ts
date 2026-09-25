@@ -2,8 +2,13 @@
  * Resizable size for the tutor panel, remembered between visits.
  *
  * The panel is pinned to the bottom-right corner, so growing it extends up and to the left — which
- * is why the drag handle lives at the TOP-LEFT corner and why dragging up/left increases the size.
+ * is why the handles live on the TOP and LEFT sides and why dragging up/left increases the size.
  * A bottom-right handle (what `resize: both` would give) would try to grow the panel off-screen.
+ *
+ * Three handles, because a corner alone is a small target and forces both dimensions to move
+ * together: the top edge changes height, the left edge changes width, and the corner does both.
+ * Which axes a drag may touch is decided here rather than in the markup, so a handle cannot
+ * accidentally resize an axis it does not own.
  *
  * Only applies from the `sm` breakpoint up. Below that the panel is full-width by design and there
  * is nothing sensible to resize.
@@ -27,6 +32,13 @@ export interface PanelSize {
   width: number
   height: number
 }
+
+/** Which side is being dragged, and therefore which dimensions may change. */
+export type ResizeEdge = 'corner' | 'top' | 'left'
+
+/** The corner moves both; each edge moves only its own axis. */
+const movesWidth = (edge: ResizeEdge) => edge !== 'top'
+const movesHeight = (edge: ResizeEdge) => edge !== 'left'
 
 const storage = (): Storage | undefined => {
   try {
@@ -78,7 +90,13 @@ export function usePanelSize() {
    * relying on it produced NaN sizes. The move event always does, so the first one sets the origin
    * and later ones measure against it.
    */
-  const dragRef = useRef<{ x?: number; y?: number; width: number; height: number }>()
+  const dragRef = useRef<{
+    x?: number
+    y?: number
+    width: number
+    height: number
+    edge: ResizeEdge
+  }>()
 
   // Read stored size after mount so first paint never depends on storage.
   useEffect(() => setSize(readStored()), [])
@@ -111,12 +129,12 @@ export function usePanelSize() {
   }, [])
 
   const startResize = useCallback(
-    (event: React.PointerEvent) => {
+    (event: React.PointerEvent, edge: ResizeEdge = 'corner') => {
       if (!isDesktop) return
       event.preventDefault()
       const x = Number.isFinite(event.clientX) ? event.clientX : undefined
       const y = Number.isFinite(event.clientY) ? event.clientY : undefined
-      dragRef.current = { x, y, width: size.width, height: size.height }
+      dragRef.current = { x, y, width: size.width, height: size.height, edge }
       setResizing(true)
     },
     [isDesktop, size.width, size.height],
@@ -136,10 +154,11 @@ export function usePanelSize() {
         return
       }
 
-      // Anchored bottom-right: moving left or up makes the panel bigger.
+      // Anchored bottom-right: moving left or up makes the panel bigger. An axis the handle does
+      // not own keeps its starting value, so dragging the top edge cannot nudge the width.
       commit({
-        width: start.width + (start.x - event.clientX),
-        height: start.height + (start.y - event.clientY),
+        width: movesWidth(start.edge) ? start.width + (start.x - event.clientX) : start.width,
+        height: movesHeight(start.edge) ? start.height + (start.y - event.clientY) : start.height,
       })
     }
     const stop = () => {
@@ -157,14 +176,21 @@ export function usePanelSize() {
     }
   }, [resizing, commit])
 
-  /** Arrow keys resize too, so the handle is usable without a pointer. */
+  /**
+   * Arrow keys resize too, so every handle is usable without a pointer.
+   *
+   * A handle only answers to the arrows for the axis it owns; the others fall through, so the keys
+   * a handle ignores still scroll the page as they normally would.
+   */
   const nudge = useCallback(
-    (event: React.KeyboardEvent) => {
-      const moves: Record<string, PanelSize> = {
-        ArrowLeft: { width: size.width + STEP, height: size.height },
-        ArrowRight: { width: size.width - STEP, height: size.height },
-        ArrowUp: { width: size.width, height: size.height + STEP },
-        ArrowDown: { width: size.width, height: size.height - STEP },
+    (event: React.KeyboardEvent, edge: ResizeEdge = 'corner') => {
+      const horizontal = movesWidth(edge)
+      const vertical = movesHeight(edge)
+      const moves: Record<string, PanelSize | undefined> = {
+        ArrowLeft: horizontal ? { width: size.width + STEP, height: size.height } : undefined,
+        ArrowRight: horizontal ? { width: size.width - STEP, height: size.height } : undefined,
+        ArrowUp: vertical ? { width: size.width, height: size.height + STEP } : undefined,
+        ArrowDown: vertical ? { width: size.width, height: size.height - STEP } : undefined,
       }
       const next = moves[event.key]
       if (!next) return
