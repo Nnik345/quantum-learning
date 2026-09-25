@@ -129,8 +129,50 @@ describe('progress', () => {
   it('writes a versioned payload', () => {
     const { result } = renderHook(() => useProgress())
     act(() => result.current.markComplete('complex-numbers'))
-    expect(stored().version).toBe(1)
+    expect(stored().version).toBe(2)
     expect(stored().completed).toEqual(['complex-numbers'])
+  })
+
+  // --- exercises ---------------------------------------------------------
+  //
+  // Solving is recorded separately from completing. Conflating them would let a new exercise
+  // retroactively un-complete a step somebody had already finished.
+
+  it('records a solved exercise without touching completion', () => {
+    const { result } = renderHook(() => useProgress())
+    act(() => result.current.markComplete('quantum-gates'))
+    act(() => result.current.markSolved('reach-minus'))
+
+    expect(result.current.solved.has('reach-minus')).toBe(true)
+    expect(result.current.completed.has('quantum-gates')).toBe(true)
+    expect(stored().solved).toEqual(['reach-minus'])
+  })
+
+  it('ignores an exercise id that does not exist', () => {
+    const { result } = renderHook(() => useProgress())
+    act(() => result.current.markSolved('no-such-exercise'))
+    expect(result.current.solved.size).toBe(0)
+  })
+
+  it('loads a version 1 payload that predates exercises', () => {
+    window.localStorage.setItem(
+      PROGRESS_KEY,
+      JSON.stringify({ version: 1, visited: ['complex-numbers'], completed: ['complex-numbers'] }),
+    )
+    const { result } = renderHook(() => useProgress())
+
+    // Nothing is lost, and the missing field simply reads as "nothing solved yet".
+    expect(result.current.completed.has('complex-numbers')).toBe(true)
+    expect(result.current.solved.size).toBe(0)
+  })
+
+  it('drops a solved id that no longer exists', () => {
+    window.localStorage.setItem(
+      PROGRESS_KEY,
+      JSON.stringify({ version: 2, visited: [], completed: [], solved: ['renamed-away'] }),
+    )
+    const { result } = renderHook(() => useProgress())
+    expect(result.current.solved.size).toBe(0)
   })
 })
 

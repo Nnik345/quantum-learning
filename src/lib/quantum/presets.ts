@@ -10,38 +10,8 @@
  * In registers below, q0 is therefore the MOST significant bit.
  */
 
-import { createCircuit, type Circuit, type Placement, type QubitInput } from './circuit'
-
-let counter = 0
-
-/** Terse placement builder: g(gate, targets, column, controls, params). */
-const g = (
-  gate: string,
-  targets: number[],
-  column: number,
-  controls: number[] = [],
-  params: number[] = [],
-): Placement => ({ id: `preset${counter++}`, gate, targets, controls, params, column })
-
-/** The same single-qubit gate on several wires in one column. */
-const spread = (gate: string, wires: number[], column: number): Placement[] =>
-  wires.map((w) => g(gate, [w], column))
-
-/** Inputs for `n` wires, all |0⟩ except those named. */
-function inputs(n: number, overrides: Record<number, QubitInput['preset']> = {}): QubitInput[] {
-  return Array.from({ length: n }, (_, q) => ({ preset: overrides[q] ?? '0' }))
-}
-
-const build = (
-  numQubits: number,
-  columns: number,
-  placements: Placement[],
-  overrides: Record<number, QubitInput['preset']> = {},
-): Circuit => ({
-  ...createCircuit(numQubits, columns),
-  inputs: inputs(numQubits, overrides),
-  placements,
-})
+import { type Circuit, type Placement } from './circuit'
+import { build, g, spread } from './builder'
 
 /**
  * Inverse QFT over three counting wires [a, b, c] (a most significant).

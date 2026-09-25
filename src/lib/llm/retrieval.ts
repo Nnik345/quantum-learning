@@ -13,6 +13,7 @@
 import { TRACKS } from '../../content/registry'
 import type { Block, Topic } from '../../content/types'
 import { ALGORITHM_PRESETS, type AlgorithmPreset } from '../quantum/presets'
+import { getExercise } from '../../content/exercises'
 
 export interface RetrievedTopic {
   trackId: string
@@ -52,6 +53,14 @@ function blockText(block: Block): string {
       return `[worked circuit: preset "${block.preset}"]${block.caption ? ` ${block.caption}` : ''}`
     case 'widget':
       return `[interactive: ${block.widget}]`
+    /*
+     * The prompt, but never the answer. The tutor should know an exercise is on the page so it can
+     * talk the learner through it; handing it the solution would let it give the game away.
+     */
+    case 'exercise': {
+      const exercise = getExercise(block.id)
+      return exercise ? `[exercise "${exercise.id}"] ${exercise.prompt}` : ''
+    }
   }
 }
 

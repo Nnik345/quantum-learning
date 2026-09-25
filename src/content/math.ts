@@ -96,6 +96,7 @@ const complexNumbers: Topic = {
           text: 'It also explains why **global phase is unobservable**. Multiply a state by $e^{i\\gamma}$ and every probability is unchanged, because',
         },
         { kind: 'math', tex: '|e^{i\\gamma}\\alpha|^2 = e^{i\\gamma}\\alpha \\cdot \\overline{e^{i\\gamma}\\alpha} = e^{i\\gamma}e^{-i\\gamma}\\alpha\\bar\\alpha = |\\alpha|^2' },
+        { kind: 'exercise', id: 'amplitude-to-probability' },
       ],
     },
     {

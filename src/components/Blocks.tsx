@@ -1,6 +1,7 @@
 import type { Block } from '../content/types'
 import { CircuitPreview } from './CircuitPreview'
 import { WIDGETS } from '../content/widgets'
+import { ExerciseBlock } from '../learning/ExerciseBlock'
 import { RichText, Tex } from './Tex'
 
 const CALLOUT_TONES = {
@@ -88,6 +89,9 @@ function BlockView({ block }: { block: Block }) {
           )}
         </figure>
       )
+
+    case 'exercise':
+      return <ExerciseBlock id={block.id} />
 
     case 'widget': {
       const Widget = WIDGETS[block.widget]

@@ -109,6 +109,7 @@ const bellStates: Topic = {
           text: 'The CNOT did not *choose* a branch. It acted on both terms of the superposition at once, flipping the second qubit only in the term where the first was $|1\\rangle$. The result cannot be written as any product $|a\\rangle \\otimes |b\\rangle$ — that is the definition of **entangled**.',
         },
         { kind: 'circuit', preset: 'bell' },
+        { kind: 'exercise', id: 'build-bell-pair' },
       ],
     },
     {
@@ -402,6 +403,7 @@ const deutschJozsa: Topic = {
           kind: 'text',
           text: 'The rule is stark: **all zeros means constant; anything else means balanced.** There is no ambiguity and no repetition needed.',
         },
+        { kind: 'exercise', id: 'fix-dj-oracle' },
       ],
     },
     {
@@ -619,6 +621,7 @@ const grover: Topic = {
           kind: 'text',
           text: 'Step through it column by column in the Circuit Lab. After the oracle the **Probabilities** tab looks completely unchanged — all four still at 25%. The sign flip only becomes visible in the **State** tab, where one amplitude has turned negative. The diffuser is what converts that hidden phase into probability.',
         },
+        { kind: 'exercise', id: 'fix-grover-oracle' },
       ],
     },
     {
@@ -819,6 +822,7 @@ const shor: Topic = {
           kind: 'text',
           text: 'Run shots and you get 000 or 100, half each. Reading 100 as the binary fraction $0.100 = 1/2$ gives $s/r = 1/2$, so $r = 2$. Then $\\gcd(4 - 1, 15) = 3$ and $\\gcd(4 + 1, 15) = 5$. And $3 \\times 5 = 15$.',
         },
+        { kind: 'exercise', id: 'shor-counting-register' },
       ],
     },
     {

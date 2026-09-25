@@ -350,6 +350,7 @@ const gates: Topic = {
           kind: 'text',
           text: '$H$ is also its own inverse, which is why the oracle algorithms sandwich the query between two layers of it: the first spreads out, the second brings back together.',
         },
+        { kind: 'exercise', id: 'reach-minus' },
       ],
     },
     {

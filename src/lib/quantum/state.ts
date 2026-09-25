@@ -188,6 +188,33 @@ export function probabilityOfOne(st: StateVector, q: number): number {
   return acc
 }
 
+/**
+ * Probability that the chosen wires read `bits`, summed over every other wire.
+ *
+ * The generalisation of `probabilityOfOne` to a subset of the register. Needed whenever only part
+ * of the register is the answer — Shor's counting wires carry the period while the work register
+ * holds whatever it happens to hold, and asking about the full basis state would be asking about
+ * both at once.
+ *
+ * `wires` and `bits` are in the site's display order, so `wires: [0, 1, 2]` with `bits: '100'`
+ * means q0 = 1, q1 = 0, q2 = 0.
+ */
+export function marginalProbability(st: StateVector, wires: number[], bits: string): number {
+  if (wires.length !== bits.length) return 0
+
+  const mask = wires.reduce((m, q) => m | (1 << bitPos(st.n, q)), 0)
+  const want = wires.reduce(
+    (v, q, k) => (bits[k] === '1' ? v | (1 << bitPos(st.n, q)) : v),
+    0,
+  )
+
+  let acc = 0
+  for (let i = 0; i < st.re.length; i++) {
+    if ((i & mask) === want) acc += st.re[i] * st.re[i] + st.im[i] * st.im[i]
+  }
+  return acc
+}
+
 export const norm = (st: StateVector): number => {
   let acc = 0
   for (let i = 0; i < st.re.length; i++) acc += st.re[i] * st.re[i] + st.im[i] * st.im[i]

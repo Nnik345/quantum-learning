@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { prerequisitesOf, type PathStep } from '../content/path'
 import type { Progress } from './useProgress'
+import { exercisesFor } from '../content/exercises'
 
 /**
  * A quiet warning when someone lands on a topic whose groundwork they have not read.
@@ -64,6 +65,11 @@ export function CompletionFooter({
 }) {
   const done = progress.completed.has(step.slug)
 
+  // Exercises on this page, and how many have been solved. Shown beside completion, never folded
+  // into it — whether a step counts as done stays the reader's own call.
+  const exercises = exercisesFor(step.slug)
+  const solved = exercises.filter((e) => progress.solved.has(e.id)).length
+
   return (
     <div className="mt-12 rounded-xl border border-line bg-surface p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,6 +79,14 @@ export function CompletionFooter({
           </div>
           <div className="mt-0.5 text-xs text-ink-faint">
             Step {step.step} of {progress.total} · {step.stage.title}
+            {exercises.length > 0 && (
+              <>
+                {' · '}
+                <span className={solved === exercises.length ? 'text-emerald' : undefined}>
+                  {solved}/{exercises.length} exercise{exercises.length === 1 ? '' : 's'} solved
+                </span>
+              </>
+            )}
           </div>
         </div>
 

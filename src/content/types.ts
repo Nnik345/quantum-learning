@@ -20,6 +20,8 @@ export type Block =
   /** A worked circuit, by preset id from lib/quantum/presets.ts. Renders read-only with a
    *  link that loads it into the Circuit Lab. */
   | { kind: 'circuit'; preset: string; caption?: string }
+  /** An exercise, by id from content/exercises.ts. Graded by running what the learner builds. */
+  | { kind: 'exercise'; id: string }
 
 export type SectionStatus = 'placeholder' | 'draft' | 'done'
 

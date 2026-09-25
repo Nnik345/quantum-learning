@@ -26,6 +26,9 @@ import { GatePalette } from './GatePalette'
 import { GateInspector } from './GateInspector'
 import { StatePanel } from './StatePanel'
 import { ProbabilityChart } from './ProbabilityChart'
+import { ExercisePanel } from './ExercisePanel'
+import { getExercise } from '../content/exercises'
+import { useProgress } from '../learning/useProgress'
 import { BlochPanel } from './BlochPanel'
 import { ShotsPanel } from './ShotsPanel'
 import { CustomGateDialog } from './CustomGateDialog'
@@ -46,6 +49,7 @@ const TABS: { id: Tab; label: string }[] = [
 export function CircuitBoard() {
   const store = useCircuitStore()
   const { circuit } = store
+  const progress = useProgress()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const svgRef = useRef<SVGSVGElement>(null)
@@ -108,6 +112,26 @@ export function CircuitBoard() {
     setInspectStep(found.circuit.columns)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run only when the parameter changes
   }, [presetId])
+
+  /*
+   * An exercise arriving by query parameter. Unlike a preset the id is KEPT, because the panel has
+   * to stay on screen for as long as the learner is working on it. A fix-it exercise also brings a
+   * broken circuit to start from; a build-it leaves whatever is already on the board alone.
+   */
+  const exerciseId = searchParams.get('exercise')
+  const exercise = exerciseId ? getExercise(exerciseId) : undefined
+  const buildExercise = exercise?.kind === 'build' ? exercise : undefined
+
+  useEffect(() => {
+    if (!buildExercise?.startFrom) return
+    store.replaceCircuit(
+      buildExercise.startFrom,
+      'Loaded the circuit to fix. Undo restores your own.',
+    )
+    setSelectedId(undefined)
+    setInspectStep(buildExercise.startFrom.columns)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run only when the exercise changes
+  }, [exerciseId])
 
   // ---------------------------------------------------------------- dragging
 
@@ -311,6 +335,17 @@ export function CircuitBoard() {
           <button onClick={store.dismissNotice} className="shrink-0 hover:text-ink">
             ✕
           </button>
+        </div>
+      )}
+
+      {buildExercise && (
+        <div className="mb-4">
+          <ExercisePanel
+            exercise={buildExercise}
+            circuit={circuit}
+            solved={progress.solved.has(buildExercise.id)}
+            onSolved={progress.markSolved}
+          />
         </div>
       )}
 
