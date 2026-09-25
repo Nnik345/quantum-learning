@@ -13,10 +13,12 @@
 import { BUILTIN_GATES } from '../quantum/gates'
 import { INPUT_PRESETS } from '../quantum/circuit'
 import { MAX_QUBITS } from '../quantum/state'
+import { ALGORITHM_PRESETS } from '../quantum/presets'
 import { contentsOutline } from './retrieval'
 
 const gateList = BUILTIN_GATES.map((g) => `${g.id} (${g.name})`).join(', ')
 const inputList = INPUT_PRESETS.map((p) => `"${p.id}" = ${p.ket}`).join(', ')
+const presetCatalogue = ALGORITHM_PRESETS.map((p) => p.id).join(', ')
 
 export interface PromptContext {
   /** Route the reader is on, e.g. "/algorithms/grovers-search". */
@@ -71,6 +73,11 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
     '  subtly wrong even when it sounds right. Do not contradict the site\'s pages.',
     '- Cover the consequences a page draws out, not just the headline fact. If the retrieved text',
     '  lists what follows from something, say those things too.',
+    '- When asked for a NAMED algorithm (Grover, teleportation, Deutsch-Jozsa, Shor, ...), call',
+    '  get_reference_circuit FIRST. It returns a tested, known-correct circuit. Build from that',
+    '  rather than from memory, and pass compareTo with its id when you call propose_circuit so the',
+    '  tool tells you whether yours matches. Your recollection of these circuits is unreliable in',
+    '  exactly the ways that matter; the reference is not.',
     '- When asked to build, show or demonstrate a circuit, call propose_circuit. The tool validates',
     '  it and returns what it ACTUALLY does. Describe that result, not what you expected.',
     '- If propose_circuit rejects your circuit, read the reason and call it again with a fix.',
@@ -80,6 +87,11 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
     '- To discuss what the reader already has on the board, call get_current_circuit.',
     '- Never state a numeric result you have not had a tool compute. If you want probabilities or a',
     '  state vector, call a tool and quote it.',
+    '- CITE the page when you answer from retrieved content. Every tool result names the page it came',
+    '  from; write it as a markdown link, e.g. [Grover\'s Search](/algorithms/grovers-search). Use the',
+    '  exact path the tool gave you — never invent one. Links to anywhere other than this site are',
+    '  stripped, so do not write them.',
+    '- To open a page by name instead of by keyword, call open_topic.',
     '- If you do not know, say so and point to the relevant page instead of guessing.',
     '',
     '## A worked circuit, in the exact shape propose_circuit expects',
@@ -109,6 +121,10 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
     '      { "gate": "Z", "targets": [1], "controls": [0], "column": 4 },',
     '      { "gate": "X", "targets": [0], "column": 5 }, { "gate": "X", "targets": [1], "column": 5 },',
     '      { "gate": "H", "targets": [0], "column": 6 }, { "gate": "H", "targets": [1], "column": 6 } ] }',
+    '',
+    '## Verified circuits available to get_reference_circuit',
+    '',
+    presetCatalogue,
     '',
     '## Site contents',
     '',

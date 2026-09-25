@@ -210,7 +210,37 @@ circuit printed on it — each preset's id, its gates, and what it actually prod
 this circuit" works on a lesson page and not only in the Lab. `run_simulation` takes a preset id, so
 exact numbers for a page's circuit are computed rather than read off the diagram.
 
-Its five tools are read-only or validated. None writes a file, runs code, or makes a network call, so
+**The site is the ground truth, not the model's memory.** `search_content` scores whole topics by
+term overlap, IDF and verbatim headings; `open_topic` fetches a page by name when the name is already
+known; and `get_reference_circuit` returns one of the twelve tested circuits — its gates, what it
+really produces, and the page it is printed on. Called blind it lists all twelve, so the model can
+find out what exists rather than needing to be told.
+
+That last tool exists because of a specific failure. Asked for Grover, the model wrote the
+controlled-Z once per wire, which is the *same gate twice* — it cancels, the marking silently
+vanishes, and the search does nothing, while a verified Grover sat in `ALGORITHM_PRESETS` the whole
+time. `propose_circuit` now takes an optional `compareTo` naming the reference being implemented, and
+reports the difference:
+
+```
+ACCEPTED: 2 qubits, 4 gates.
+DIFFERS from the verified "grover" circuit, which produces -1|11⟩ (11 100.0%).
+Yours produces 0.5|00⟩ + 0.5|01⟩ + 0.5|10⟩ + 0.5|11⟩.
+Call get_reference_circuit to see its gates, then fix yours.
+```
+
+Deliberately explicit rather than inferred: guessing which reference the reader *meant* and appending
+an unasked-for diff produces confusing contradictions when the guess is wrong.
+
+**Citations are links, and only ever to this site.** Tool results name the page they came from, and
+the prompt asks for it back as a markdown link. `src/assistant/links.ts` then resolves every href
+against the real routes — `/`, `/reference`, `/circuit`, and any `/{trackId}/{slug}` that exists — and
+anything else renders as plain text, keeping its label so no words are lost. External URLs,
+`javascript:`, protocol-relative paths and plausible-but-wrong internal paths all fail closed. Model
+output is untrusted, and a citation feature is not worth making the page a launchpad for arbitrary
+URLs.
+
+Its seven tools are read-only or validated. None writes a file, runs code, or makes a network call, so
 a hostile question can do no worse than draw a silly circuit.
 
 Reasoning is on for circuit building, hidden behind a "show reasoning" toggle, and off for ordinary
@@ -338,5 +368,6 @@ against their Bloch positions), the circuit editing rules, and page-level tests 
 drag-and-drop and the input picker.
 
 The tutor adds its own: the validator against malformed and hostile model output, retrieval against
-known queries, tool dispatch, stream parsing, and the whole panel — tool loop included — driven by a
+known queries, reference lookup for all twelve circuits, link rendering against hostile hrefs, tool
+dispatch, stream parsing, and the whole panel — tool loop included — driven by a
 scripted fake model rather than a live one.

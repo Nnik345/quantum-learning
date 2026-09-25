@@ -9,7 +9,16 @@
 import type { Circuit } from '../quantum/circuit'
 import { serialiseCircuit } from '../quantum/circuit'
 import { gateDef } from '../quantum/circuit'
-import { searchContent, topicBySlug, topicToText } from './retrieval'
+import {
+  searchContent,
+  searchCircuits,
+  topicBySlug,
+  topicToText,
+  presetPage,
+  findTopic,
+  topicDirectory,
+} from './retrieval'
+import { ALGORITHM_PRESETS } from '../quantum/presets'
 import { getTopic } from '../../content/registry'
 import { pathStepFor } from '../../content/path'
 import { getPreset } from '../quantum/presets'
@@ -45,9 +54,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'get_reference_circuit',
+      description:
+        'Look up a VERIFIED circuit for a known algorithm — its exact gates, what it really produces, and the page it appears on. Call this BEFORE building any named algorithm, so you are working from ground truth rather than memory. Call it with no name to list every circuit available.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Algorithm name or preset id, e.g. "grover", "teleportation", "Bell state". Omit to list all.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_topic',
+      description:
+        'Open a specific lesson page by name and read all of it. Use this when you know which page you want; use search_content when you do not.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Topic title or slug, e.g. "Grover\'s Search" or "entanglement".' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'propose_circuit',
       description:
-        'Build a circuit in the simulator. It is validated and run, and the tool returns what it ACTUALLY does — describe that, not what you expected. Use this whenever asked to build, show or demonstrate a circuit.',
+        'Build a circuit in the simulator. It is validated and run, and the tool returns what it ACTUALLY does — describe that, not what you expected. Use this whenever asked to build, show or demonstrate a circuit. When building a known algorithm, pass compareTo with its name to have your circuit checked against the verified one.',
       parameters: CIRCUIT_SCHEMA,
     },
   },
@@ -100,6 +141,51 @@ export interface ToolResult {
   circuit?: ValidationResult
 }
 
+/**
+ * Find a verified circuit by id or name, tolerantly.
+ *
+ * The model says "grover", "Grover's Search", "grovers search" — all should land on the same
+ * preset, since the whole point is that looking up ground truth must not fail on phrasing.
+ */
+export function findPreset(query: string) {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const wanted = norm(query)
+  if (!wanted) return undefined
+
+  const candidates = ALGORITHM_PRESETS.map((preset) => ({
+    preset,
+    id: norm(preset.id),
+    name: norm(preset.name),
+  }))
+
+  return (
+    candidates.find((c) => c.id === wanted || c.name === wanted)?.preset ??
+    candidates.find((c) => c.id.includes(wanted) || c.name.includes(wanted))?.preset ??
+    // Last resort: any query word that is distinctive enough to name a preset.
+    candidates.find((c) =>
+      wanted.split(' ').some((w) => w.length >= 4 && (c.id.includes(w) || c.name.includes(w))),
+    )?.preset
+  )
+}
+
+/** One verified circuit, rendered for the model: gates, real outcome, and where it is printed. */
+function describeReference(preset: (typeof ALGORITHM_PRESETS)[number]): string {
+  const outcome = describeOutcome(preset.circuit)
+  const page = presetPage(preset.id)
+  return [
+    `VERIFIED CIRCUIT "${preset.id}" — ${preset.name}`,
+    preset.summary,
+    describeCircuit(preset.circuit),
+    `Produces: ${outcome.dirac}`,
+    `Outcomes: ${outcome.probabilities.slice(0, 6).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}`,
+    outcome.entangled.length ? `Entangled: q${outcome.entangled.join(', q')}` : 'No entanglement.',
+    page ? `Explained on /${page.trackId}/${page.slug} ("${page.title}")` : '',
+    'This circuit is tested and known correct. Build from it rather than from memory.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 /** Human-readable gate list, so the model sees a circuit the way the reader does. */
 export function describeCircuit(circuit: Circuit): string {
   const gates = [...circuit.placements]
@@ -141,16 +227,92 @@ export async function dispatchTool(
               'Nothing on the site covers that. Say so, and answer from general knowledge only if you are confident.',
           }
         }
-        return {
-          content: hits
-            .map((h) => `--- from /${h.trackId}/${h.slug} ---\n${h.text}`)
-            .join('\n\n'),
+        const circuits = searchCircuits(query, 2)
+        const parts = hits.map((h) => `--- from /${h.trackId}/${h.slug} ---\n${h.text}`)
+
+        // Circuits come after the prose and are capped, so they can never crowd lesson text out.
+        for (const hit of circuits) {
+          parts.push(
+            `--- verified circuit, ${hit.page ? `printed on /${hit.page.trackId}/${hit.page.slug}` : 'not printed on a page'} ---\n` +
+              describeReference(hit.preset),
+          )
         }
+        return { content: parts.join('\n\n') }
       }
 
       case 'propose_circuit': {
         const result = validateProposal(args)
-        return { content: summariseForModel(result), circuit: result }
+        let content = summariseForModel(result)
+
+        // An explicit self-check against ground truth. The model names what it is implementing,
+        // so nothing has to be inferred — a guessed comparison would contradict the reader
+        // whenever the guess was wrong.
+        const compareTo = typeof args.compareTo === 'string' ? args.compareTo.trim() : ''
+        if (compareTo && result.ok && result.outcome) {
+          const reference = findPreset(compareTo)
+          if (!reference) {
+            content += `\n\nNo verified circuit named "${compareTo}" — call get_reference_circuit with no name to see what exists.`
+          } else {
+            const theirs = describeOutcome(reference.circuit)
+            const same = theirs.dirac === result.outcome.dirac
+            content += same
+              ? `\n\nMatches the verified "${reference.id}" circuit, which also produces ${theirs.dirac}.`
+              : `\n\nDIFFERS from the verified "${reference.id}" circuit, which produces ${theirs.dirac} ` +
+                `(${theirs.probabilities.slice(0, 4).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}). ` +
+                `Yours produces ${result.outcome.dirac}. Call get_reference_circuit to see its gates, then fix yours.`
+          }
+        }
+        return { content, circuit: result }
+      }
+
+      case 'get_reference_circuit': {
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        const preset = name ? findPreset(name) : undefined
+
+        if (!preset) {
+          // Blind or unmatched calls list everything, so the model can discover what exists
+          // instead of needing to already know the ids.
+          const catalogue = ALGORITHM_PRESETS.map((p) => {
+            const page = presetPage(p.id)
+            return `  "${p.id}" — ${p.name}${page ? ` (/${page.trackId}/${page.slug})` : ''}`
+          }).join('\n')
+          return {
+            content:
+              (name ? `No verified circuit matches "${name}".\n\n` : '') +
+              `Verified circuits available:\n${catalogue}\n\nCall this tool again with one of those names.`,
+          }
+        }
+        return { content: describeReference(preset) }
+      }
+
+      case 'open_topic': {
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        if (!name) return { content: 'Give the name of the page to open.' }
+
+        const found = findTopic(name)
+        if (!found) {
+          // Naming the real pages beats sending it back to guess, and beats answering from a page
+          // that merely shares a word with what it asked for.
+          return {
+            content: [
+              `No page is called "${name}". The pages are:`,
+              topicDirectory(),
+              'Open one of these by name, or use search_content to search by keyword.',
+            ].join('\n'),
+          }
+        }
+
+        const step = pathStepFor(found.slug)
+        return {
+          content: [
+            `/${found.trackId}/${found.slug} — "${found.title}"`,
+            step ? `Step ${step.step} of the learning path, in the ${step.stage.title} stage.` : '',
+            '',
+            found.text,
+          ]
+            .filter((l) => l !== '')
+            .join('\n'),
+        }
       }
 
       case 'get_current_page': {

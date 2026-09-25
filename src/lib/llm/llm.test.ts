@@ -119,10 +119,12 @@ describe('system prompt', () => {
 // --- tool definitions ------------------------------------------------------
 
 describe('tool definitions', () => {
-  it('exposes exactly the five read-only tools', () => {
+  it('exposes exactly the seven tools, only one of which writes anything', () => {
     expect(TOOL_DEFINITIONS.map((t) => t.function.name)).toEqual([
       'search_content',
       'get_current_page',
+      'get_reference_circuit',
+      'open_topic',
       'propose_circuit',
       'get_current_circuit',
       'run_simulation',

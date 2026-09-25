@@ -116,6 +116,13 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
 
   const ms = Date.now() - started
 
+  /**
+   * Tools the case insisted on. Checked separately from the physics because a circuit can be right
+   * by luck while the behaviour under test — looking the answer up rather than recalling it — did
+   * not happen.
+   */
+  const missingTools = (testCase.requireTools ?? []).filter((t) => !tools.includes(t))
+
   if (testCase.kind === 'circuit') {
     if (!circuit) {
       const why = timedOut
@@ -136,7 +143,17 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
       }
     }
     const { pass, detail } = testCase.check(circuit)
-    return { id: testCase.id, kind: 'circuit', intent: testCase.intent, pass, detail, text: answer, ms, evalTokens, tools }
+    return {
+      id: testCase.id,
+      kind: 'circuit',
+      intent: testCase.intent,
+      pass: pass && missingTools.length === 0,
+      detail: missingTools.length ? `${detail}; never called ${missingTools.join(', ')}` : detail,
+      text: answer,
+      ms,
+      evalTokens,
+      tools,
+    }
   }
 
   if (timedOut && !answer.trim()) {
@@ -159,10 +176,11 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
     id: testCase.id,
     kind: 'text',
     intent: testCase.intent,
-    pass: missing.length === 0 && forbidden.length === 0,
+    pass: missing.length === 0 && forbidden.length === 0 && missingTools.length === 0,
     detail: [
       missing.length ? `missing ${missing.map(String).join(', ')}` : '',
       forbidden.length ? `said ${forbidden.map(String).join(', ')}` : '',
+      missingTools.length ? `never called ${missingTools.join(', ')}` : '',
     ]
       .filter(Boolean)
       .join('; ') || 'all expected terms present',

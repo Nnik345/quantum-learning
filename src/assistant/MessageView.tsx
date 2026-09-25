@@ -2,12 +2,39 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { RichText } from '../components/Tex'
+import { splitLinks } from './links'
 import { CircuitGrid } from '../circuit/CircuitGrid'
 import { requestLoad, isBoardMounted } from '../circuit/circuitBridge'
 import type { ValidationResult } from '../lib/llm/validate'
 import type { DisplayMessage } from './useAssistant'
 
 const noop = () => {}
+
+/**
+ * One line of model prose: markdown links first, then the site's own inline formatting.
+ *
+ * Only links to real pages here become clickable; anything else keeps its label as plain text.
+ * See links.ts for why.
+ */
+function Line({ text }: { text: string }) {
+  return (
+    <>
+      {splitLinks(text).map((segment, i) =>
+        segment.kind === 'link' ? (
+          <Link
+            key={i}
+            to={segment.href!}
+            className="text-cyan underline decoration-cyan/40 underline-offset-2 hover:decoration-cyan"
+          >
+            {segment.text}
+          </Link>
+        ) : (
+          <RichText key={i} text={segment.text} />
+        ),
+      )}
+    </>
+  )
+}
 
 /**
  * Model prose, rendered with the site's own inline formatting.
@@ -31,7 +58,7 @@ function AssistantText({ text }: { text: string }) {
             <div key={i} className="flex gap-2 pl-1">
               <span className="text-ink-faint">•</span>
               <span className="min-w-0 flex-1">
-                <RichText text={bullet[1]} />
+                <Line text={bullet[1]} />
               </span>
             </div>
           )
@@ -43,7 +70,7 @@ function AssistantText({ text }: { text: string }) {
             <div key={i} className="flex gap-2 pl-1">
               <span className="font-mono text-ink-faint">{numbered[1]}.</span>
               <span className="min-w-0 flex-1">
-                <RichText text={numbered[2]} />
+                <Line text={numbered[2]} />
               </span>
             </div>
           )
@@ -53,14 +80,14 @@ function AssistantText({ text }: { text: string }) {
         if (heading) {
           return (
             <div key={i} className="pt-1 text-[13px] font-semibold text-ink">
-              <RichText text={heading[1]} />
+              <Line text={heading[1]} />
             </div>
           )
         }
 
         return (
           <p key={i}>
-            <RichText text={trimmed} />
+            <Line text={trimmed} />
           </p>
         )
       })}

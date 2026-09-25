@@ -16,6 +16,8 @@ export interface CircuitCase {
   prompt: string
   /** Given the validated circuit the model produced, did it do the right thing? */
   check: (result: ValidationResult) => { pass: boolean; detail: string }
+  /** Tools the model must have called. Use only where consulting one is the point of the case. */
+  requireTools?: string[]
 }
 
 export interface TextCase {
@@ -27,6 +29,8 @@ export interface TextCase {
   expect: RegExp[]
   /** None of these may appear. */
   reject?: RegExp[]
+  /** Tools the model must have called. Use only where consulting one is the point of the case. */
+  requireTools?: string[]
 }
 
 export type EvalCase = CircuitCase | TextCase
@@ -186,5 +190,42 @@ export const EVAL_CASES: EvalCase[] = [
     intent: 'Knows a simulator limitation it could not guess',
     prompt: 'Can I use a measurement result to control a later gate in this simulator?',
     expect: [/no|cannot|can't|not possible/i],
+  },
+  {
+    kind: 'text',
+    id: 'citation',
+    intent: 'Cites the page an answer came from, as a link the reader can follow',
+    prompt: 'What is the Bernstein–Vazirani algorithm, and where can I read about it on this site?',
+    /*
+     * The markdown form is the test, not the bare path: an answer that merely mentions a URL is not
+     * a citation the reader can click. Only internal paths survive rendering, so an external link
+     * here would be silently dropped — hence the rejection rather than mere absence of credit.
+     */
+    expect: [/\]\(\/algorithms\/bernstein-vazirani\)/, /one query|single query|one call|one shot/i],
+    reject: [/https?:\/\//],
+  },
+  {
+    kind: 'circuit',
+    id: 'reference-backed',
+    intent: 'Consults the verified circuit instead of building a named algorithm from memory',
+    /*
+     * The site's Bernstein–Vazirani hides s = 1011. That choice is arbitrary and local, so a model
+     * working from memory cannot land on it — which makes the hidden string itself the evidence that
+     * the reference was read rather than recalled.
+     */
+    prompt: 'Build the Bernstein–Vazirani circuit exactly as it appears on this site.',
+    requireTools: ['get_reference_circuit'],
+    check: (r) => {
+      const likely = (r.outcome?.probabilities ?? []).filter((x) => x.percent > 1)
+      const wrong = likely.filter((x) => !x.label.startsWith('1011'))
+      return {
+        pass: likely.length > 0 && wrong.length === 0,
+        detail: likely.length
+          ? wrong.length
+            ? `read s = ${likely[0].label.slice(0, 4)}, not the site's 1011`
+            : `recovered s = 1011 (${likely.map((x) => x.label).join(', ')})`
+          : 'no outcome to read',
+      }
+    },
   },
 ]

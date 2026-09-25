@@ -12,6 +12,7 @@
 
 import { TRACKS } from '../../content/registry'
 import type { Block, Topic } from '../../content/types'
+import { ALGORITHM_PRESETS, type AlgorithmPreset } from '../quantum/presets'
 
 export interface RetrievedTopic {
   trackId: string
@@ -224,6 +225,123 @@ export function topicBySlug(slug: string): RetrievedTopic | undefined {
     score: Infinity,
     text: topicToText(entry.topic),
   }
+}
+
+/**
+ * Resolve a page by slug or title, tolerantly but not loosely.
+ *
+ * `open_topic` is a lookup, not a search, so a near-miss must not quietly hand back a different
+ * page: "quantum gastronomy" sharing the word "quantum" with a real title is not a match, and
+ * answering from the wrong page is worse than admitting there is none. Matching is therefore
+ * confined to the name itself — normalised for punctuation, since titles use a typographic
+ * apostrophe the model will not reproduce.
+ */
+export function findTopic(name: string): RetrievedTopic | undefined {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const wanted = norm(name)
+  if (!wanted) return undefined
+
+  const candidates = INDEX.map((entry) => ({
+    entry,
+    slug: norm(entry.topic.slug),
+    title: norm(entry.topic.title),
+  }))
+
+  const hit =
+    candidates.find((c) => c.slug === wanted || c.title === wanted) ??
+    // A containment match still has to cover the whole request, not one shared word.
+    candidates.find((c) => c.slug.includes(wanted) || c.title.includes(wanted))
+  if (!hit) return undefined
+
+  return {
+    trackId: hit.entry.trackId,
+    slug: hit.entry.topic.slug,
+    title: hit.entry.topic.title,
+    score: Infinity,
+    text: topicToText(hit.entry.topic),
+  }
+}
+
+/** Every page's path and title, for telling the model what it could have asked for instead. */
+export function topicDirectory(): string {
+  return INDEX.map((e) => `  /${e.trackId}/${e.topic.slug} — "${e.topic.title}"`).join('\n')
+}
+
+/**
+ * Which lesson page prints a given circuit, derived by scanning content for its circuit blocks.
+ *
+ * Built rather than declared so a preset moved to a different page cannot end up citing the wrong
+ * one — there is no second list to keep in step.
+ */
+const PRESET_PAGE: Map<string, { trackId: string; slug: string; title: string }> = (() => {
+  const map = new Map<string, { trackId: string; slug: string; title: string }>()
+  for (const track of TRACKS) {
+    for (const topic of track.topics) {
+      for (const section of topic.sections) {
+        for (const block of section.blocks ?? []) {
+          if (block.kind === 'circuit' && !map.has(block.preset)) {
+            map.set(block.preset, { trackId: track.id, slug: topic.slug, title: topic.title })
+          }
+        }
+      }
+    }
+  }
+  return map
+})()
+
+/** The page a verified circuit appears on, if any prints it. */
+export const presetPage = (presetId: string) => PRESET_PAGE.get(presetId)
+
+export interface RetrievedCircuit {
+  preset: AlgorithmPreset
+  score: number
+  /** Where it is printed, when a lesson prints it. */
+  page?: { trackId: string; slug: string; title: string }
+}
+
+/** Terms that should surface a circuit: its id, its name, and the page that prints it. */
+const CIRCUIT_INDEX = ALGORITHM_PRESETS.map((preset) => {
+  const page = PRESET_PAGE.get(preset.id)
+  const weights = new Map<string, number>()
+  const add = (text: string, weight: number) => {
+    for (const term of terms(text)) weights.set(term, (weights.get(term) ?? 0) + weight)
+  }
+  add(preset.id.replace(/-/g, ' '), 8)
+  add(preset.name, 8)
+  add(preset.summary, 2)
+  if (page) add(page.title, 4)
+  // So "show me a teleportation CIRCUIT" scores these above prose.
+  add('circuit diagram gates example', 3)
+  return { preset, page, weights }
+})
+
+/**
+ * Verified circuits matching a query.
+ *
+ * Returned alongside topics rather than instead of them, and capped, so circuit hits can never
+ * crowd the lesson text out of the context budget.
+ */
+export function searchCircuits(query: string, limit = 2): RetrievedCircuit[] {
+  const queryTerms = terms(query)
+  if (queryTerms.length === 0) return []
+
+  return CIRCUIT_INDEX.map((entry) => {
+    let score = 0
+    let matched = 0
+    for (const term of queryTerms) {
+      const direct = entry.weights.get(term)
+      if (direct !== undefined) {
+        score += direct
+        matched++
+      }
+    }
+    // Same coverage rule as topic search: one stray word is not a match.
+    return { entry, score: matched / queryTerms.length >= 0.5 ? score : 0 }
+  })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ entry, score }) => ({ preset: entry.preset, page: entry.page, score }))
 }
 
 /** Every topic title, cheap enough to always include so the model knows what exists. */
