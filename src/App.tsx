@@ -6,6 +6,7 @@ import { Home } from './routes/Home'
 import { TrackIndex } from './routes/TrackIndex'
 import { TopicPage } from './routes/TopicPage'
 import { CircuitBoard } from './circuit/CircuitBoard'
+import { AssistantPanel } from './assistant/AssistantPanel'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+      <AssistantPanel />
     </div>
   )
 }

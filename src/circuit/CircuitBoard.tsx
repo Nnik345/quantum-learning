@@ -18,6 +18,7 @@ import {
 import { simulate, stepCount } from '../lib/quantum/simulate'
 import { circuitToJson, deserialiseCircuit } from '../lib/quantum/persist'
 import { getPreset } from '../lib/quantum/presets'
+import { publishCircuit, unpublishCircuit, takePendingCircuit } from './circuitBridge'
 import type { CustomGate } from '../lib/quantum/gates'
 
 import { CircuitGrid } from './CircuitGrid'
@@ -72,6 +73,22 @@ export function CircuitBoard() {
   useEffect(() => {
     setInspectStep((s) => Math.min(s, circuit.columns))
   }, [circuit.columns])
+
+  // Let the assistant read the board, and collect any circuit it parked while we were unmounted.
+  useEffect(() => {
+    publishCircuit(circuit, (next) =>
+      store.replaceCircuit(next, 'Loaded the tutor\u2019s circuit. Undo restores your own.'),
+    )
+    return unpublishCircuit
+  }, [circuit, store])
+
+  useEffect(() => {
+    const parked = takePendingCircuit()
+    if (!parked) return
+    store.replaceCircuit(parked, 'Loaded the tutor\u2019s circuit. Undo restores your own.')
+    setInspectStep(parked.columns)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- collect once on mount
+  }, [])
 
   /**
    * Load a worked circuit arriving as ?preset=<id> from a lesson page.

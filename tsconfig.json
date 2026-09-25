@@ -23,5 +23,5 @@
     "paths": { "@/*": ["./src/*"] },
     "types": ["vitest/globals"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "eval", "vite.config.ts"]
 }
