@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { NavLink, Link } from 'react-router-dom'
 
 /**
- * Three entries, not four tracks. The path is the way through; reference is for browsing once you
- * know what you are looking for.
+ * Four entries, not four tracks. Home says what the site is, the path is the way through, and
+ * reference is for browsing once you know what you are looking for.
  */
 const NAV = [
-  { to: '/', label: 'Path', exact: true },
+  { to: '/', label: 'Home', exact: true },
+  { to: '/path', label: 'Path' },
   { to: '/reference', label: 'Reference' },
   { to: '/circuit', label: 'Circuit Lab' },
 ]

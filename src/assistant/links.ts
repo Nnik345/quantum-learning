@@ -9,7 +9,7 @@
 
 import { TRACKS, getTopic } from '../content/registry'
 
-const STATIC_ROUTES = new Set(['/', '/reference', '/circuit'])
+const STATIC_ROUTES = new Set(['/', '/path', '/reference', '/circuit'])
 
 /**
  * True when `href` names a page that actually exists here.

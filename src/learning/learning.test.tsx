@@ -147,11 +147,13 @@ describe('statusOf', () => {
   })
 })
 
-// --- the path home ---------------------------------------------------------
+// --- the path page ---------------------------------------------------------
+//
+// The ordered listing moved to /path when the landing page took over /. These tests follow it.
 
-describe('the path home page', () => {
+describe('the path page', () => {
   it('lists every step, in order, grouped by stage', () => {
-    renderAt('/')
+    renderAt('/path')
     const links = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
     for (const step of PATH) {
       expect(links).toContain(`/${step.trackId}/${step.slug}`)
@@ -161,7 +163,7 @@ describe('the path home page', () => {
   })
 
   it('offers the first step to a new reader', () => {
-    renderAt('/')
+    renderAt('/path')
     expect(screen.getByText(/Start here/i)).toBeDefined()
     expect(screen.getByText('Not started')).toBeDefined()
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
@@ -172,7 +174,7 @@ describe('the path home page', () => {
       PROGRESS_KEY,
       JSON.stringify({ version: 1, visited: [], completed: ['complex-numbers', 'vectors-and-matrices'] }),
     )
-    renderAt('/')
+    renderAt('/path')
 
     expect(screen.getByText(/Next up/i)).toBeDefined()
     expect(screen.getByText(`2 of ${PATH_LENGTH} complete`)).toBeDefined()
@@ -186,13 +188,13 @@ describe('the path home page', () => {
       PROGRESS_KEY,
       JSON.stringify({ version: 1, visited: [], completed: PATH.map((s) => s.slug) }),
     )
-    renderAt('/')
+    renderAt('/path')
     expect(screen.getByText(/finished the path/i)).toBeDefined()
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', String(PATH_LENGTH))
   })
 
   it('hides the reset control until there is something to reset', () => {
-    renderAt('/')
+    renderAt('/path')
     expect(screen.queryByRole('button', { name: /reset progress/i })).toBeNull()
   })
 })

@@ -61,7 +61,7 @@ export function TopicPage() {
         <nav className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
           {step && (
             <>
-              <Link to="/" className="font-mono text-cyan hover:underline">
+              <Link to="/path" className="font-mono text-cyan hover:underline">
                 step {step.step}/{progress.total}
               </Link>
               <span>·</span>
@@ -122,7 +122,7 @@ export function TopicPage() {
             </Link>
           ) : (
             <Link
-              to="/"
+              to="/path"
               className="group rounded-lg border border-emerald/40 px-4 py-3 text-right transition-colors hover:bg-emerald/5 sm:max-w-[48%]"
             >
               <div className="text-[11px] uppercase tracking-wider text-ink-faint">Last step</div>

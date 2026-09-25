@@ -20,7 +20,7 @@ export function Reference() {
       <p className="mt-2 max-w-2xl text-[15px] leading-7 text-ink-dim">
         Everything on the site, grouped by kind rather than by reading order. If you are working
         through it for the first time,{' '}
-        <Link to="/" className="text-cyan hover:underline">
+        <Link to="/path" className="text-cyan hover:underline">
           follow the path
         </Link>{' '}
         instead.

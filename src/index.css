@@ -92,3 +92,70 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/*
+ * Home-page motion.
+ *
+ * Decorative only — the orbit rings and the pulse travelling along the hero wire. Kept here rather
+ * than inline so the reduced-motion opt-out lives next to the animations it switches off.
+ */
+@keyframes ql-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ql-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes ql-trace {
+  from {
+    stroke-dashoffset: 420;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes ql-breathe {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.ql-orbit {
+  transform-origin: 50% 50%;
+  animation: ql-orbit 38s linear infinite;
+}
+.ql-orbit-slow {
+  transform-origin: 50% 50%;
+  animation: ql-orbit 64s linear infinite reverse;
+}
+.ql-drift {
+  animation: ql-drift 7s ease-in-out infinite;
+}
+.ql-trace {
+  stroke-dasharray: 90 330;
+  animation: ql-trace 6s linear infinite;
+}
+.ql-breathe {
+  animation: ql-breathe 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ql-orbit,
+  .ql-orbit-slow,
+  .ql-drift,
+  .ql-trace,
+  .ql-breathe {
+    animation: none;
+  }
+}

@@ -10,6 +10,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 import App from './App'
+import { PATH_LENGTH } from './content/path'
 import { CELL_H, CELL_W, HEADER_H, LABEL_W, gridHeight, gridWidth } from './circuit/geometry'
 
 vi.mock('./components/LazyBlochSphere', () => ({
@@ -30,10 +31,22 @@ const renderAt = (path: string) =>
   )
 
 describe('routes', () => {
-  it('renders the path as the home page', () => {
+  it('renders the landing page at the root', () => {
     renderAt('/')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/quantum computing/i)
-    // The front door is now the journey, not three parallel tracks.
+    // The front door sells the site; the ordered listing lives at /path.
+    // Twice on purpose: once in the banner, once in the closing call to action.
+    expect(screen.getAllByRole('link', { name: /start at step 1/i })).toHaveLength(2)
+    expect(screen.getByRole('link', { name: /open the circuit lab/i })).toBeDefined()
+    // The stats strip counts real content rather than hard-coding figures, so this fails if the
+    // path is renumbered without the front door noticing.
+    expect(screen.getByText('steps, in order')).toBeDefined()
+    expect(screen.getAllByText(String(PATH_LENGTH)).length).toBeGreaterThan(0)
+    expect(screen.getByText('verified circuits')).toBeDefined()
+  })
+
+  it('renders the ordered path at /path', () => {
+    renderAt('/path')
     expect(screen.getByRole('progressbar')).toBeDefined()
     expect(screen.getByText(/Start here/i)).toBeDefined()
   })
