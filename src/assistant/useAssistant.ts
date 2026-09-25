@@ -25,9 +25,16 @@ export interface DisplayMessage {
   thinking?: string
   /** Circuits produced this turn, already validated and simulated. */
   circuits: ValidationResult[]
+  /** Python the tutor offered this turn, for the user to accept into their editor. */
+  snippets: PythonSnippet[]
   toolsUsed: string[]
   error?: string
   streaming?: boolean
+}
+
+export interface PythonSnippet {
+  code: string
+  explanation?: string
 }
 
 export type AssistantStatus = 'idle' | 'thinking' | 'working' | 'streaming'
@@ -93,12 +100,13 @@ export function useAssistant(context: PromptContext & { currentSlug?: string }) 
       if (!health.ok) {
         setMessages((prev) => [
           ...prev,
-          { id: newId(), role: 'user', content: question, circuits: [], toolsUsed: [] },
+          { id: newId(), role: 'user', content: question, circuits: [], snippets: [], toolsUsed: [] },
           {
             id: newId(),
             role: 'assistant',
             content: '',
             circuits: [],
+            snippets: [],
             toolsUsed: [],
             error: health.error ?? 'The local model is unavailable.',
           },
@@ -109,8 +117,8 @@ export function useAssistant(context: PromptContext & { currentSlug?: string }) 
       const replyId = newId()
       setMessages((prev) => [
         ...prev,
-        { id: newId(), role: 'user', content: question, circuits: [], toolsUsed: [] },
-        { id: replyId, role: 'assistant', content: '', circuits: [], toolsUsed: [], streaming: true },
+        { id: newId(), role: 'user', content: question, circuits: [], snippets: [], toolsUsed: [] },
+        { id: replyId, role: 'assistant', content: '', circuits: [], snippets: [], toolsUsed: [], streaming: true },
       ])
 
       const abort = new AbortController()
@@ -139,6 +147,7 @@ export function useAssistant(context: PromptContext & { currentSlug?: string }) 
         let content = ''
         let thinking = ''
         const circuits: ValidationResult[] = []
+        const snippets: PythonSnippet[] = []
         const toolsUsed: string[] = []
 
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -178,12 +187,13 @@ export function useAssistant(context: PromptContext & { currentSlug?: string }) 
               currentSlug: context.currentSlug,
             })
             if (result.circuit?.ok) circuits.push(result.circuit)
+            if (result.python) snippets.push(result.python)
             wire.push({ role: 'tool', content: result.content, tool_name: name })
           }
-          update({ toolsUsed: [...toolsUsed], circuits: [...circuits] })
+          update({ toolsUsed: [...toolsUsed], circuits: [...circuits], snippets: [...snippets] })
         }
 
-        update({ content, thinking, circuits, toolsUsed, streaming: false })
+        update({ content, thinking, circuits, snippets, toolsUsed, streaming: false })
       } catch (err) {
         if (!(err instanceof Error && err.name === 'AbortError')) {
           update({

@@ -13,11 +13,19 @@ import {
   equalUpToGlobalPhase,
   finalState,
   implementsSameOperation,
+  sameDistribution,
 } from '../lib/quantum/equivalence'
 import { basisLabel, marginalProbability, probabilities } from '../lib/quantum/state'
 import { simulate } from '../lib/quantum/simulate'
 import type { Circuit } from '../lib/quantum/circuit'
-import { predictCircuit, type BuildExercise, type Exercise, type PredictExercise, type ValueExercise } from './exercises'
+import {
+  predictCircuit,
+  type BuildExercise,
+  type Exercise,
+  type GradingMode,
+  type PredictExercise,
+  type ValueExercise,
+} from './exercises'
 
 export interface Verdict {
   correct: boolean
@@ -40,18 +48,29 @@ function outcomeSummary(circuit: Circuit): string {
     .join(', ')
 }
 
-function gradeBuild(exercise: BuildExercise, attempt: Circuit): Verdict {
-  if (attempt.placements.length === 0) {
-    return { correct: false, message: 'The board is empty — place some gates and check again.' }
-  }
+/**
+ * Compare an attempt with a reference by BEHAVIOUR.
+ *
+ * Shared by the circuit exercises and the Python lessons, so a Bell pair built by dragging gates and
+ * one built by typing Qiskit are held to exactly the same standard — and there is only one
+ * implementation that could be wrong.
+ */
+export function gradeAgainst(
+  attempt: Circuit,
+  solution: Circuit,
+  mode: GradingMode,
+  target: string,
+  emptyMessage = 'The board is empty — place some gates and check again.',
+): Verdict {
+  if (attempt.placements.length === 0) return { correct: false, message: emptyMessage }
 
   // Different registers cannot be compared at all, so say that rather than reporting a mismatch.
-  if (attempt.numQubits !== exercise.solution.numQubits) {
+  if (attempt.numQubits !== solution.numQubits) {
     return {
       correct: false,
-      message: `This exercise is on ${exercise.solution.numQubits} ${
-        exercise.solution.numQubits === 1 ? 'wire' : 'wires'
-      }, and your circuit has ${attempt.numQubits}. Change the wire count and try again.`,
+      message: `This one is on ${solution.numQubits} ${
+        solution.numQubits === 1 ? 'qubit' : 'qubits'
+      }, and yours has ${attempt.numQubits}. Change the register size and try again.`,
     }
   }
 
@@ -61,34 +80,40 @@ function gradeBuild(exercise: BuildExercise, attempt: Circuit): Verdict {
   }
 
   const correct =
-    exercise.grade === 'operation'
-      ? implementsSameOperation(attempt, exercise.solution)
-      : equalUpToGlobalPhase(finalState(attempt), finalState(exercise.solution))
+    mode === 'operation'
+      ? implementsSameOperation(attempt, solution)
+      : mode === 'distribution'
+        ? sameDistribution(finalState(attempt), finalState(solution))
+        : equalUpToGlobalPhase(finalState(attempt), finalState(solution))
 
   if (correct) {
     return {
       correct: true,
-      message:
-        exercise.grade === 'operation'
-          ? 'Correct — it behaves the right way on every input, not just this one.'
-          : 'Correct — that is the target state.',
+      message: {
+        operation: 'Correct — it behaves the right way on every input, not just this one.',
+        distribution: 'Correct — those are the right outcome probabilities.',
+        state: 'Correct — that is the target state.',
+      }[mode],
     }
   }
 
-  if (exercise.grade === 'operation') {
+  if (mode === 'operation') {
     return {
       correct: false,
       message: `Not yet. From |${'0'.repeat(attempt.numQubits)}⟩ yours gives ${outcomeSummary(
         attempt,
-      )}, but the test is every input, not only this one. Target: ${exercise.target}.`,
+      )}, but the test is every input, not only this one. Target: ${target}.`,
     }
   }
 
   return {
     correct: false,
-    message: `Not yet. Yours gives ${outcomeSummary(attempt)}. Target: ${exercise.target}.`,
+    message: `Not yet. Yours gives ${outcomeSummary(attempt)}. Target: ${target}.`,
   }
 }
+
+const gradeBuild = (exercise: BuildExercise, attempt: Circuit): Verdict =>
+  gradeAgainst(attempt, exercise.solution, exercise.grade, exercise.target)
 
 function gradePredict(exercise: PredictExercise, answer: number): Verdict {
   const actual =

@@ -8,6 +8,9 @@ import { Reference } from './routes/Reference'
 import { TrackIndex } from './routes/TrackIndex'
 import { TopicPage } from './routes/TopicPage'
 import { CircuitBoard } from './circuit/CircuitBoard'
+import { PythonHome } from './routes/python/PythonHome'
+import { PythonPlayground } from './routes/python/PythonPlayground'
+import { PythonLesson } from './routes/python/PythonLesson'
 import { AssistantPanel } from './assistant/AssistantPanel'
 
 export default function App() {
@@ -21,6 +24,10 @@ export default function App() {
           <Route path="/path" element={<PathHome />} />
           <Route path="/reference" element={<Reference />} />
           <Route path="/circuit" element={<CircuitBoard />} />
+          {/* Playground before the dynamic slug, so the two cannot be confused. */}
+          <Route path="/python" element={<PythonHome />} />
+          <Route path="/python/playground" element={<PythonPlayground />} />
+          <Route path="/python/:slug" element={<PythonLesson />} />
           <Route path="/:trackId" element={<TrackIndex />} />
           <Route path="/:trackId/:slug" element={<TopicPage />} />
           <Route path="*" element={<NotFound />} />

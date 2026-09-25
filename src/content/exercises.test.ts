@@ -184,7 +184,8 @@ describe('near misses are rejected, with a reason', () => {
   it('names the wire count when the register is the wrong size', () => {
     const verdict = gradeCircuit(buildExercise('reach-minus'), build(3, 3, [g('H', [0], 0)]))
     expect(verdict.correct).toBe(false)
-    expect(verdict.message).toMatch(/wire/i)
+    // Says how many the exercise wants and how many they have, rather than a generic mismatch.
+    expect(verdict.message).toMatch(/qubit/i)
     expect(verdict.message).toMatch(/\b3\b/)
   })
 

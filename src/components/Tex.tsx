@@ -42,19 +42,36 @@ export function RichText({ text, className }: { text: string; className?: string
   )
 }
 
+/**
+ * Inline emphasis: **bold** and `code`.
+ *
+ * Code spans earn their place now that the Python guide writes prose about `circuit.cx(0, 1)` —
+ * without them a method name is indistinguishable from the sentence around it.
+ */
 function Bold({ text }: { text: string }) {
-  const segments = text.split(/(\*\*[^*]+\*\*)/g)
+  const segments = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.startsWith('**') && seg.endsWith('**') && seg.length > 4 ? (
-          <strong key={i} className="font-semibold text-ink">
-            {seg.slice(2, -2)}
-          </strong>
-        ) : (
-          <span key={i}>{seg}</span>
-        ),
-      )}
+      {segments.map((seg, i) => {
+        if (seg.startsWith('**') && seg.endsWith('**') && seg.length > 4) {
+          return (
+            <strong key={i} className="font-semibold text-ink">
+              {seg.slice(2, -2)}
+            </strong>
+          )
+        }
+        if (seg.startsWith('`') && seg.endsWith('`') && seg.length > 2) {
+          return (
+            <code
+              key={i}
+              className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[0.9em] text-cyan"
+            >
+              {seg.slice(1, -1)}
+            </code>
+          )
+        }
+        return <span key={i}>{seg}</span>
+      })}
     </>
   )
 }

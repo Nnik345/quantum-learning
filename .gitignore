@@ -1,6 +1,28 @@
+# Node
 node_modules/
 dist/
 .vite/
-*.local
-.DS_Store
+coverage/
 *.tsbuildinfo
+
+# Python service (pyserver/). requirements.txt IS tracked — it is the spec; these are not.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments. The project uses pyenv, but a stray venv should never be committed either.
+.venv/
+venv/
+
+# Names a pyenv virtualenv that exists only on the machine that created it. pyserver/README.md
+# says how to make one; hard-coding a local env name would break every other checkout.
+.python-version
+
+# Local overrides and scratch
+*.local
+*.log
+
+# OS
+.DS_Store

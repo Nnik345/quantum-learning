@@ -27,6 +27,8 @@ export interface PromptContext {
   topicTitle?: string
   /** Whether there is a circuit on the board worth reading. */
   hasCircuit?: boolean
+  /** Whether the reader is on a Python page, where a different set of tools applies. */
+  onPythonPage?: boolean
 }
 
 export function buildSystemPrompt(context: PromptContext = {}): string {
@@ -144,6 +146,30 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
       'how you see any circuit printed on the page.',
     )
   }
+  /*
+   * Python guidance is added only where it applies. The prompt is already close to its ceiling, and
+   * a reader on the Bloch sphere page gains nothing from paragraphs about Qiskit — but on a Python
+   * page this is the most important thing in the prompt.
+   */
+  if (context.onPythonPage) {
+    lines.push(
+      '',
+      '## They are writing Python',
+      '',
+      'This site runs REAL Qiskit 2.x through a local service — no execute(), no Aer; use',
+      'qiskit.quantum_info.Statevector. Pages: /python, /python/<lesson>, /python/playground.',
+      '',
+      '- Call get_python_code FIRST when they mention their code, an error, or why something fails.',
+      '  It returns their code, its output, any traceback, and the task.',
+      '- Read the traceback before theorising. The exception and line number are usually the answer.',
+      '- To offer a fix use suggest_python with the COMPLETE program — it replaces their editor, so a',
+      '  fragment destroys their work. Say in your reply what you changed.',
+      '- You CANNOT run Python. Never claim a suggestion works; say what you expect and let them run it.',
+      '- On a lesson you do NOT have the answer, only the task. Help them reason; never invent it.',
+      '- Qiskit numbers qubits from the RIGHT, the opposite of this site. Say which ordering you mean.',
+    )
+  }
+
   if (context.hasCircuit) {
     lines.push(
       '',
@@ -160,12 +186,17 @@ export const estimateTokens = (text: string): number => Math.ceil(text.length / 
 /**
  * How large the system prompt is allowed to get.
  *
- * A quarter of the 8k context window. The rest has to hold up to two retrieved topics (~3000
- * tokens together), the conversation so far, and the answer — so this is the share the prompt can
- * take without squeezing the content it exists to talk about.
+ * Roughly a quarter of the 8k context window. The rest has to hold up to two retrieved topics
+ * (~3000 tokens together), the conversation so far, and the answer — so this is the share the
+ * prompt can take without squeezing the content it exists to talk about.
+ *
+ * Raised from 2048 when the Python guidance arrived. That block is only added on a Python page, so
+ * the common case is still ~1980; the ceiling has to cover the worst case, which is ~2180. At 2304
+ * the prompt is 28% of the window, leaving ~2700 tokens for the conversation after a full
+ * retrieval — comfortable for a tutoring exchange.
  *
  * Stated as an absolute number rather than a fraction because that is how it gets discussed, and
  * because it should not quietly double if the context window is ever raised. Raising the window is
  * a reason to hold more *content*, not to write a longer prompt.
  */
-export const MAX_SYSTEM_PROMPT_TOKENS = 2048
+export const MAX_SYSTEM_PROMPT_TOKENS = 2304

@@ -8,6 +8,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm test           # 376 tests
 npm run eval       # scores the tutor against a live Ollama
+python pyserver/server.py   # the Python service, for the /python page
 npm run build
 ```
 
@@ -245,6 +246,93 @@ a hostile question can do no worse than draw a silly circuit.
 
 Reasoning is on for circuit building, hidden behind a "show reasoning" toggle, and off for ordinary
 conversation where a twenty-second pause is not worth it.
+
+## Python, with real Qiskit
+
+A six-lesson Qiskit guide you work through by typing the code yourself, plus an open playground.
+
+- `/python` — the guide: six lessons from a single gate to Grover's search
+- `/python/<lesson>` — read the idea, then complete a stub. Your code runs, and is graded
+- `/python/playground` — an open editor with no task attached
+
+**The tasks are graded by behaviour, not by text.** Your code runs, the circuit is pulled out of
+Qiskit, flipped into this site's wire order and compared against a reference with the same
+`gradeAgainst` the circuit exercises use. A Bell pair built on qubit 1 instead of qubit 0, or with the
+gates in another order, passes — because it is a Bell pair. Nothing ever compares source code.
+
+Grading has three modes, and choosing wrongly is the main way to be unfair. `state` for a task that
+names a state, `operation` for one that must hold on every input, and `distribution` for one phrased
+in terms of measurement outcomes — a task asking for "50% on each outcome" must accept |−⟩ as readily
+as |+⟩, and originally it did not.
+
+The editor is CodeMirror 6 with the Python grammar, themed from the site's own tokens and **lazily
+loaded**: it is a 362 KB chunk that only the Python pages pay for, the same arrangement three.js has.
+
+Both the guide and the playground can load whatever circuit your code built onto the board.
+
+**Qiskit cannot run in a browser.** Its Rust core (`qiskit._accelerate`) publishes no WebAssembly
+wheel, `qiskit-terra` has never published a pure-Python one, and the pure-Python `qiskit` 0.44–0.46
+wheels are metapackages that depend on `qiskit-terra` — so `micropip.install("qiskit")` fails at every
+version. Rather than ship a lookalike, Python runs in a small local service, the same shape as Ollama:
+a process on this machine behind a Vite proxy, with nothing leaving the box. No Pyodide, and **no new
+frontend dependencies**.
+
+```sh
+pyenv virtualenv 3.14.7 quantum-learning && pyenv local quantum-learning
+pip install -r pyserver/requirements.txt
+python pyserver/server.py          # its own terminal, like ollama serve
+```
+
+`PY_URL` retargets it exactly as `OLLAMA_URL` does. Because the proxy runs inside the Vite process,
+`localhost` means the machine Vite is on — the service needs no GPU, so running it next to Vite is
+simplest even when Ollama is on another box. When it is not running the page says so and names the
+command, rather than failing silently.
+
+**It is a local tool, not a sandbox.** Each run is a fresh subprocess with a wall-clock timeout, an
+address-space cap, a CPU cap and its own session, which stops a runaway loop or a stray allocation.
+There is no filesystem or network isolation — that needs namespaces or a container — so it binds to
+`127.0.0.1` and `pyserver/README.md` says plainly not to expose the port.
+
+### The tutor can read your code
+
+`src/lib/python/pythonBridge.ts` mirrors `circuitBridge`: the Python pages publish what is in the
+editor, what it printed, any traceback and the task being attempted, and the tutor reads it through
+two tools — `get_python_code` and `suggest_python`. A suggestion appears in the chat with a button;
+putting it in the editor is the user's click, never the model's.
+
+**The tutor cannot run Python, deliberately.** The sandbox has no filesystem isolation, so letting a
+model execute code it wrote would be a real escalation from "only the user runs code". A test asserts
+no such tool exists. The prompt tells it to say what it expects rather than claim a fix works.
+
+**It never receives the task's solution.** The bridge carries the prompt and the target as printed on
+the page, and nothing else — a tutor that can read the answer will hand it over. A test walks the
+lesson's solution and asserts none of it reaches the model.
+
+Python guidance is added to the system prompt only on a Python page, so a reader on a theory page
+pays nothing for it. That raised the prompt ceiling from 2048 to 2304 tokens for the Python case;
+the common case is unchanged at ~1980.
+
+### The bit order, reconciled rather than warned about
+
+Qiskit is little-endian: qubit `i` has place value 2^i, so **q0 is the rightmost character** in a
+printed bitstring. This site is the reverse, and says so on all 22 lesson pages.
+`src/lib/python/qiskitOrder.ts` maps `siteWire = n - 1 - qiskitQubit`, and the useful consequence is
+that **after the flip both systems print the same bitstring for the same state**:
+
+```
+Qiskit:  qc.x(0) on 3 qubits   ->  001   (qubit 0 is rightmost)
+Here:    X on wire 2 of 3      ->  001   (wire 0 is leftmost)
+```
+
+So the conversion turns the site's sharpest conflict with Qiskit into something a learner can check
+for themselves, and one of the starter programs does exactly that. Qiskit's own output is shown
+verbatim; the board shows the site's convention; the page explains the mirroring. The conversion lives
+in one function so there is exactly one place it can be wrong, and its tests assert that
+same-bitstring property directly rather than just the arithmetic.
+
+Circuits come back in Qiskit's indices and go through `validateProposal` — the same validator that
+guards the tutor's circuits, which already resolves `cx`/`cz`/`ccx`/`cswap`/`cp` aliases and assigns
+columns. Qiskit output and model output are the same trust category.
 
 ### Why the ordering guard exists
 

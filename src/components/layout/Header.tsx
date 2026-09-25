@@ -10,6 +10,7 @@ const NAV = [
   { to: '/path', label: 'Path' },
   { to: '/reference', label: 'Reference' },
   { to: '/circuit', label: 'Circuit Lab' },
+  { to: '/python', label: 'Python' },
 ]
 
 export function Header() {

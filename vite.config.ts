@@ -9,17 +9,31 @@ const src = new URL('./src', import.meta.url).pathname
 declare const process: { env: Record<string, string | undefined> }
 
 /**
- * Ollama is proxied rather than called directly.
+ * Both local services are proxied rather than called directly.
  *
- * The browser only ever talks to this dev server, so `/ollama/*` is same-origin and there is no
- * CORS configuration to get wrong. It also means an SSH tunnel needs no code change: forward
- * 11434 to the GPU box and the target below still points at localhost.
+ * The browser only ever talks to this dev server, so `/ollama/*` and `/pyserver/*` are same-origin and
+ * there is no CORS configuration to get wrong. It also means an SSH tunnel needs no code change:
+ * forward the port to whichever box runs the service and the targets below still say localhost.
+ *
+ * Note that `localhost` here is resolved by THIS process, so it means the machine Vite runs on —
+ * not the machine the browser is on.
  */
-const ollamaProxy = {
+const proxy = {
   '/ollama': {
     target: process.env.OLLAMA_URL ?? 'http://localhost:11434',
     changeOrigin: true,
     rewrite: (path: string) => path.replace(/^\/ollama/, ''),
+  },
+  /*
+   * The Python service, which runs real Qiskit. See pyserver/README.md.
+   *
+   * Named `/pyserver` rather than `/py` deliberately: Vite matches proxies by PREFIX, so a `/py`
+   * rule also swallows the `/python` page route and serves a 502 instead of the app.
+   */
+  '/pyserver': {
+    target: process.env.PY_URL ?? 'http://localhost:8000',
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/pyserver/, ''),
   },
 }
 
@@ -28,6 +42,6 @@ export default defineConfig({
   resolve: {
     alias: { '@': src },
   },
-  server: { proxy: ollamaProxy },
-  preview: { proxy: ollamaProxy },
+  server: { proxy },
+  preview: { proxy },
 })

@@ -7,6 +7,7 @@
  */
 
 import type { Circuit } from '../quantum/circuit'
+import { getCurrentPython } from '../python/pythonBridge'
 import { serialiseCircuit } from '../quantum/circuit'
 import { gateDef } from '../quantum/circuit'
 import {
@@ -104,6 +105,34 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'get_python_code',
+      description:
+        "Read the Python the user has in the editor, what it printed, any traceback, and the task they are attempting. Call this FIRST whenever they mention their code, an error, or ask why something does not work.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'suggest_python',
+      description:
+        "Offer Python the user can put into their editor with one click. Use it to show a fix or a worked approach. Send the COMPLETE program, not a fragment, since it replaces what is there. Explain the change in your reply; do not rely on comments alone.",
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: 'The complete Python program.' },
+          explanation: {
+            type: 'string',
+            description: 'One line on what changed and why, shown above the code.',
+          },
+        },
+        required: ['code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_simulation',
       description:
         'Run a circuit and return exact amplitudes, probabilities and per-qubit Bloch vectors. Give a preset id to run a circuit printed on a lesson page, or omit it to run whatever is on the user\'s board. Use this instead of calculating anything yourself.',
@@ -139,6 +168,8 @@ export interface ToolResult {
   content: string
   /** A circuit the UI should render. Never shown unless validation passed. */
   circuit?: ValidationResult
+  /** Python the UI should offer to put in the editor. */
+  python?: { code: string; explanation?: string }
 }
 
 /**
@@ -438,6 +469,57 @@ export async function dispatchTool(
           )
         }
         return { content: lines.join('\n') }
+      }
+
+      case 'get_python_code': {
+        const snapshot = getCurrentPython()
+        if (!snapshot) {
+          return {
+            content:
+              'The user is not on a Python page right now, so there is no editor to read. The Python guide is at /python and the open editor at /python/playground.',
+          }
+        }
+
+        const lines = [
+          snapshot.where === 'lesson'
+            ? `They are on Python lesson "${snapshot.lessonTitle}" (/python/${snapshot.lessonSlug}).`
+            : 'They are in the Python playground (/python/playground).',
+          snapshot.taskPrompt ? `The task: ${snapshot.taskPrompt}` : '',
+          snapshot.taskTarget ? `Success looks like: ${snapshot.taskTarget}` : '',
+          '',
+          '--- their code ---',
+          snapshot.code.trim() || '(the editor is empty)',
+        ]
+
+        if (snapshot.error) lines.push('', '--- it raised ---', snapshot.error)
+        if (snapshot.stdout?.trim()) lines.push('', '--- it printed ---', snapshot.stdout.trim())
+        if (snapshot.stderr?.trim()) lines.push('', '--- stderr ---', snapshot.stderr.trim())
+        if (snapshot.verdict) lines.push('', `--- the grader said ---`, snapshot.verdict)
+        if (!snapshot.error && !snapshot.stdout?.trim() && !snapshot.verdict) {
+          lines.push('', 'They have not run it yet.')
+        }
+
+        /*
+         * Deliberately no solution. Helping someone reason to an answer is the job; handing it over
+         * is not, and the surest way to keep that true is for the answer never to arrive here.
+         */
+        lines.push(
+          '',
+          'You do NOT have the task\'s solution. Help them reason it out; do not claim to know the expected answer.',
+        )
+        return { content: lines.filter((l) => l !== '').join('\n') }
+      }
+
+      case 'suggest_python': {
+        const code = typeof args.code === 'string' ? args.code : ''
+        if (!code.trim()) return { content: 'No code given.' }
+
+        const explanation = typeof args.explanation === 'string' ? args.explanation : undefined
+        return {
+          content:
+            'Shown to the user with a button to put it in their editor. Now explain in your reply what you changed and why — they can read the code themselves.',
+          python: { code, explanation },
+        }
       }
 
       default:

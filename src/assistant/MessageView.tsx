@@ -6,7 +6,8 @@ import { splitLinks } from './links'
 import { CircuitGrid } from '../circuit/CircuitGrid'
 import { requestLoad, isBoardMounted } from '../circuit/circuitBridge'
 import type { ValidationResult } from '../lib/llm/validate'
-import type { DisplayMessage } from './useAssistant'
+import type { DisplayMessage, PythonSnippet } from './useAssistant'
+import { requestInsert, isEditorMounted } from '../lib/python/pythonBridge'
 
 const noop = () => {}
 
@@ -160,6 +161,50 @@ function ProposedCircuit({ result }: { result: ValidationResult }) {
   )
 }
 
+/**
+ * Python the tutor is offering.
+ *
+ * Shown, never applied: putting it in the editor is one click, and that click is the user's. The
+ * tutor cannot run this and has not tested it, so the code is presented as a suggestion to read
+ * rather than an answer to trust — which is the same standing its circuits have before the
+ * simulator has checked them.
+ */
+function SuggestedPython({ snippet }: { snippet: PythonSnippet }) {
+  const [inserted, setInserted] = useState(false)
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-ground/50">
+      {snippet.explanation && (
+        <div className="border-b border-line px-3 py-1.5 text-[11px] leading-4 text-ink-dim">
+          {snippet.explanation}
+        </div>
+      )}
+      <pre className="max-h-64 overflow-auto px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+        {snippet.code}
+      </pre>
+      <div className="flex items-center gap-2 border-t border-line px-3 py-2">
+        <button
+          onClick={() => {
+            requestInsert(snippet.code)
+            setInserted(true)
+          }}
+          className="rounded border border-cyan px-2 py-0.5 text-[11px] text-cyan transition-colors hover:bg-cyan/10"
+        >
+          Put in my editor
+        </button>
+        {inserted && !isEditorMounted() && (
+          <Link to="/python/playground" className="text-[11px] text-cyan hover:underline">
+            open the editor →
+          </Link>
+        )}
+        {inserted && isEditorMounted() && (
+          <span className="text-[10px] text-ink-faint">inserted — Ctrl+Z to undo</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function MessageView({ message }: { message: DisplayMessage }) {
   const [showReasoning, setShowReasoning] = useState(false)
 
@@ -211,6 +256,10 @@ export function MessageView({ message }: { message: DisplayMessage }) {
 
           {message.circuits.map((circuit, i) => (
             <ProposedCircuit key={i} result={circuit} />
+          ))}
+
+          {message.snippets.map((snippet, i) => (
+            <SuggestedPython key={i} snippet={snippet} />
           ))}
 
           {message.streaming && !message.content && (

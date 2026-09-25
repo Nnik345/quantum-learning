@@ -38,7 +38,12 @@ export function AssistantPanel() {
   const context = useMemo(() => {
     const [, trackId, slug] = location.pathname.split('/')
     const topic = trackId && slug ? getTopic(trackId, slug) : undefined
-    return { path: location.pathname, topicTitle: topic?.title, currentSlug: topic?.slug }
+    return {
+      path: location.pathname,
+      topicTitle: topic?.title,
+      currentSlug: topic?.slug,
+      onPythonPage: location.pathname.startsWith('/python'),
+    }
   }, [location.pathname])
 
   const { messages, status, health, send, stop, clear, checkHealth } = useAssistant(context)

@@ -1,0 +1,5 @@
+# Pinned to what was verified against Python 3.14.7: every one of these has a prebuilt
+# linux wheel for cp314, so nothing compiles from source.
+qiskit==2.5.2
+fastapi==0.141.1
+uvicorn==0.54.0

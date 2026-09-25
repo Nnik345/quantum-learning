@@ -24,7 +24,14 @@ import { build, g, spread } from '../lib/quantum/builder'
 import { abs2, c } from '../lib/quantum/complex'
 import { getPreset } from '../lib/quantum/presets'
 
-export type GradingMode = 'state' | 'operation'
+/*
+ * 'state'        reach this exact state. Right when the prompt NAMES a state.
+ * 'operation'    behave like this on every input. Right for oracles.
+ * 'distribution' match these outcome probabilities, whatever the phases. Right when the prompt asks
+ *                for a measurement result — rejecting |−⟩ for a task that asked for "50% each"
+ *                would be telling a learner they are wrong about something they got right.
+ */
+export type GradingMode = 'state' | 'operation' | 'distribution'
 
 interface BaseExercise {
   id: string

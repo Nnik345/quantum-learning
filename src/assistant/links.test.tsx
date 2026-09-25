@@ -101,6 +101,7 @@ describe('rendered model prose', () => {
     role: 'assistant',
     content,
     circuits: [],
+    snippets: [],
     toolsUsed: [],
   })
 

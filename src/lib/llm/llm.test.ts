@@ -112,14 +112,25 @@ describe('system prompt', () => {
     // Guards the budget itself, not just the prompt: raising the context window is a reason to hold
     // more retrieved content, never an excuse for a longer prompt. Two topics run to ~3000 tokens
     // and still have to fit alongside it.
-    expect(MAX_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(DEFAULT_NUM_CTX * 0.25)
+    //
+    // Moved from 25% to 30% when the Python guidance arrived. That block only applies on a Python
+    // page, so the common prompt is still ~1980; the ceiling covers the worst case of ~2180.
+    expect(MAX_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(DEFAULT_NUM_CTX * 0.3)
+  })
+
+  it('only spends the extra budget where Python guidance applies', () => {
+    // The point of making it conditional: a reader on a theory page pays nothing for it.
+    const theory = estimateTokens(buildSystemPrompt({ path: '/theory/measurement' }))
+    const python = estimateTokens(buildSystemPrompt({ path: '/python/grover', onPythonPage: true }))
+    expect(python).toBeGreaterThan(theory)
+    expect(theory).toBeLessThanOrEqual(2048)
   })
 })
 
 // --- tool definitions ------------------------------------------------------
 
 describe('tool definitions', () => {
-  it('exposes exactly the seven tools, only one of which writes anything', () => {
+  it('exposes exactly the nine tools, none of which execute anything the user did not ask for', () => {
     expect(TOOL_DEFINITIONS.map((t) => t.function.name)).toEqual([
       'search_content',
       'get_current_page',
@@ -127,8 +138,17 @@ describe('tool definitions', () => {
       'open_topic',
       'propose_circuit',
       'get_current_circuit',
+      'get_python_code',
+      'suggest_python',
       'run_simulation',
     ])
+  })
+
+  it('gives the model no way to run Python', () => {
+    // Reading and suggesting only. The Python sandbox has no filesystem isolation, so executing
+    // model-written code would be a real escalation from "only the user runs code".
+    const names = TOOL_DEFINITIONS.map((t) => t.function.name).join(' ')
+    expect(names).not.toMatch(/run_python|execute_python|eval/)
   })
 
   it('derives the gate enum from the real palette so they cannot drift', () => {
