@@ -4,8 +4,8 @@ import { describe, it, expect } from 'vitest'
 
 import { searchContent, topicToText, topicBySlug, contentsOutline, terms } from './retrieval'
 import { dispatchTool, TOOL_DEFINITIONS } from './tools'
-import { buildSystemPrompt, estimateTokens } from './systemPrompt'
-import { parseLine, OllamaClient } from './client'
+import { buildSystemPrompt, estimateTokens, MAX_SYSTEM_PROMPT_TOKENS } from './systemPrompt'
+import { parseLine, OllamaClient, DEFAULT_NUM_CTX } from './client'
 import { ALLOWED_GATES, ALLOWED_INPUTS, CIRCUIT_SCHEMA } from './schema'
 import { getPreset } from '../quantum/presets'
 import { createCircuit, type Circuit } from '../quantum/circuit'
@@ -98,20 +98,31 @@ describe('system prompt', () => {
   it('tells the model where the reader is', () => {
     const p = buildSystemPrompt({ path: '/algorithms/grovers-search', topicTitle: 'Grover’s Search' })
     expect(p).toMatch(/Grover’s Search/)
-    expect(p).toMatch(/assume they mean this page/)
+    expect(p).toMatch(/they mean this page/)
+    // And is told to look rather than guess.
+    expect(p).toMatch(/call\s+get_current_page rather than guessing/)
   })
 
-  it('stays small enough to leave room for content', () => {
-    expect(estimateTokens(buildSystemPrompt({ path: '/x', topicTitle: 'Y', hasCircuit: true }))).toBeLessThan(1500)
+  it('leaves most of the context window for retrieved content', () => {
+    const tokens = estimateTokens(buildSystemPrompt({ path: '/x', topicTitle: 'Y', hasCircuit: true }))
+    expect(tokens).toBeLessThanOrEqual(MAX_SYSTEM_PROMPT_TOKENS)
+  })
+
+  it('keeps the prompt budget a sane share of the context window', () => {
+    // Guards the budget itself, not just the prompt: raising the context window is a reason to hold
+    // more retrieved content, never an excuse for a longer prompt. Two topics run to ~3000 tokens
+    // and still have to fit alongside it.
+    expect(MAX_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(DEFAULT_NUM_CTX * 0.25)
   })
 })
 
 // --- tool definitions ------------------------------------------------------
 
 describe('tool definitions', () => {
-  it('exposes exactly the four read-only tools', () => {
+  it('exposes exactly the five read-only tools', () => {
     expect(TOOL_DEFINITIONS.map((t) => t.function.name)).toEqual([
       'search_content',
+      'get_current_page',
       'propose_circuit',
       'get_current_circuit',
       'run_simulation',
@@ -269,5 +280,110 @@ describe('client configuration', () => {
     const health = await c.health(500)
     expect(health.ok).toBe(false)
     expect(health.error).toMatch(/Could not reach Ollama|did not respond/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Seeing the page the reader is on
+//
+// Before get_current_page existed, a reader on Grover's page asking "explain this circuit" got
+// nothing useful: get_current_circuit reads the Circuit Lab board, which is empty on a lesson page,
+// and no tool could act on a preset id even though search_content mentioned one.
+// ---------------------------------------------------------------------------
+
+describe('get_current_page', () => {
+  it('reports the topic and its position on the path', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'grovers-search' })
+    expect(r.content).toMatch(/reading "Grover’s Search"/)
+    expect(r.content).toMatch(/\/algorithms\/grovers-search/)
+    expect(r.content).toMatch(/step 19 of the learning path/)
+    expect(r.content).toMatch(/Amplitude & Phase/)
+  })
+
+  it('includes the lesson text', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'grovers-search' })
+    expect(r.content).toMatch(/Amplitude Amplification/)
+    expect(r.content).toMatch(/reflect/i)
+  })
+
+  it('exposes every circuit printed on the page, gate by gate', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'grovers-search' })
+    expect(r.content).toMatch(/circuits printed on this page \(1\)/)
+    expect(r.content).toMatch(/preset id "grover"/)
+    // The actual gates, so the model can explain or modify rather than guess from a caption.
+    expect(r.content).toMatch(/Z on q1 controlled by q0/)
+    // And what it really does, computed.
+    expect(r.content).toMatch(/Result: .*\|11⟩/)
+  })
+
+  it('says plainly when a page has no circuits', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'complex-numbers' })
+    expect(r.content).toMatch(/reading "Complex Numbers"/)
+    expect(r.content).toMatch(/prints no circuits/)
+  })
+
+  it('finds the maths page a reader is stuck on', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'eigenvalues-and-eigenvectors' })
+    expect(r.content).toMatch(/Eigenvalues/)
+    expect(r.content).toMatch(/eigenvalue equation/i)
+    // Now in Foundations, not stranded at step 18.
+    expect(r.content).toMatch(/step 3 of the learning path/)
+  })
+
+  it('copes with not being on a lesson page at all', async () => {
+    const r = await dispatchTool('get_current_page', {}, {})
+    expect(r.content).toMatch(/not on a lesson page/)
+  })
+
+  it('copes with an unknown slug', async () => {
+    const r = await dispatchTool('get_current_page', {}, { currentSlug: 'nope' })
+    expect(r.content).toMatch(/No lesson page matches/)
+  })
+})
+
+describe('run_simulation on a page circuit', () => {
+  it('runs a named preset rather than the board', async () => {
+    // No board at all — the point is that a lesson page still gets exact numbers.
+    const r = await dispatchTool('run_simulation', { preset: 'bell' }, { currentSlug: 'bell-states' })
+    expect(r.content).toMatch(/Simulated "Bell State Preparation"/)
+    expect(r.content).toMatch(/00 50\.00%/)
+    expect(r.content).toMatch(/11 50\.00%/)
+    expect(r.content).toMatch(/\|r\|=0\.000/)
+  })
+
+  it('samples shots from a preset', async () => {
+    const r = await dispatchTool('run_simulation', { preset: 'grover', shots: 150 })
+    expect(r.content).toMatch(/Sampled 150 shots: 11 x150/)
+  })
+
+  it('still runs the board when no preset is given', async () => {
+    const r = await dispatchTool('run_simulation', {}, { currentCircuit: getPreset('bell')!.circuit })
+    expect(r.content).toMatch(/Simulated the board/)
+    expect(r.content).toMatch(/00 50\.00%/)
+  })
+
+  it('names the unknown preset instead of failing silently', async () => {
+    const r = await dispatchTool('run_simulation', { preset: 'not-a-preset' })
+    expect(r.content).toMatch(/no circuit preset called "not-a-preset"/)
+    expect(r.content).toMatch(/get_current_page/)
+  })
+
+  it('points at the page when the board is empty', async () => {
+    const r = await dispatchTool('run_simulation', {})
+    expect(r.content).toMatch(/no circuit on the board/)
+    expect(r.content).toMatch(/preset id/)
+  })
+})
+
+describe('the prompt tells the model to look at the page', () => {
+  it('names get_current_page for deictic questions', () => {
+    const p = buildSystemPrompt({ path: '/algorithms/grovers-search', topicTitle: 'Grover’s Search' })
+    expect(p).toMatch(/get_current_page FIRST/)
+    expect(p).toMatch(/"the circuit above"/)
+    expect(p).toMatch(/run_simulation with that preset id/)
+  })
+
+  it('tells it never to read numbers off a diagram', () => {
+    expect(buildSystemPrompt()).toMatch(/Never read amplitudes off a diagram/)
   })
 })

@@ -120,7 +120,8 @@ describe('answering a question', () => {
 
     const system = lastRequest!.messages[0].content
     expect(system).toMatch(/Grover/)
-    expect(system).toMatch(/assume they mean this page/)
+    expect(system).toMatch(/they mean this page/)
+    expect(system).toMatch(/get_current_page/)
   })
 
   it('always states the ordering convention to the model', async () => {
@@ -319,5 +320,148 @@ describe('the rest of the site is unaffected', () => {
     const { container } = renderPanel()
     // Just the launcher button.
     expect(container.querySelectorAll('button')).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Resizing
+//
+// The panel is pinned bottom-right, so it grows up and to the left. That is why the handle sits at
+// the top-left corner: a bottom-right grip would try to drag the panel off-screen.
+// ---------------------------------------------------------------------------
+
+const { MIN_WIDTH, MIN_HEIGHT, PANEL_SIZE_KEY } = await import('./usePanelSize')
+
+/** jsdom has no layout engine, so matchMedia must be stubbed to choose the desktop branch. */
+function setViewport(desktop: boolean, width = 1440, height = 900) {
+  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
+  Object.defineProperty(window, 'innerHeight', { value: height, configurable: true })
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: (query: string) => ({
+      matches: desktop,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  })
+}
+
+const grip = () => screen.getByRole('separator', { name: /resize the tutor/i })
+const panelBox = (container: HTMLElement) =>
+  container.querySelector('[style*="width"]') as HTMLElement | null
+
+/**
+ * jsdom's synthetic pointerdown carries no coordinates, so the first move establishes the origin —
+ * exactly as it does in a browser that behaves the same way. Hence two moves, not one.
+ */
+const drag = (el: HTMLElement, dx: number, dy: number) => {
+  fireEvent.pointerDown(el, { clientX: 500, clientY: 300 })
+  const move = (x: number, y: number) =>
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y, bubbles: true }))
+    })
+  move(500, 300) // sets the origin
+  move(500 + dx, 300 + dy) // the actual drag
+  act(() => {
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
+  })
+}
+
+describe('resizing the panel', () => {
+  beforeEach(() => setViewport(true))
+
+  it('starts at the shipped size', () => {
+    const { container } = renderPanel()
+    open()
+    const box = panelBox(container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH}px`)
+    expect(box.style.height).toBe(`${MIN_HEIGHT}px`)
+  })
+
+  it('grows when dragged up and to the left', () => {
+    const { container } = renderPanel()
+    open()
+    drag(grip(), -160, -100)
+
+    const box = panelBox(container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH + 160}px`)
+    expect(box.style.height).toBe(`${MIN_HEIGHT + 100}px`)
+  })
+
+  it('refuses to shrink below the size it shipped with', () => {
+    const { container } = renderPanel()
+    open()
+    // Dragging the other way would shrink it; the floor holds.
+    drag(grip(), 300, 300)
+
+    const box = panelBox(container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH}px`)
+    expect(box.style.height).toBe(`${MIN_HEIGHT}px`)
+  })
+
+  it('will not grow past the viewport', () => {
+    setViewport(true, 800, 700)
+    const { container } = renderPanel()
+    open()
+    drag(grip(), -5000, -5000)
+
+    const box = panelBox(container)!
+    expect(Number.parseInt(box.style.width)).toBeLessThanOrEqual(800)
+    expect(Number.parseInt(box.style.height)).toBeLessThanOrEqual(700)
+  })
+
+  it('resizes with the arrow keys, for anyone not using a pointer', () => {
+    const { container } = renderPanel()
+    open()
+    fireEvent.keyDown(grip(), { key: 'ArrowLeft' })
+
+    expect(Number.parseInt(panelBox(container)!.style.width)).toBeGreaterThan(MIN_WIDTH)
+  })
+
+  it('resets on double-click', () => {
+    const { container } = renderPanel()
+    open()
+    drag(grip(), -200, -200)
+    expect(Number.parseInt(panelBox(container)!.style.width)).toBeGreaterThan(MIN_WIDTH)
+
+    fireEvent.doubleClick(grip())
+    expect(panelBox(container)!.style.width).toBe(`${MIN_WIDTH}px`)
+  })
+
+  it('remembers the size across visits', () => {
+    const first = renderPanel()
+    open()
+    drag(grip(), -120, -80)
+    first.unmount()
+
+    const second = renderPanel()
+    open()
+    const box = panelBox(second.container)!
+    expect(box.style.width).toBe(`${MIN_WIDTH + 120}px`)
+  })
+
+  it('ignores a stored size that no longer fits the window', () => {
+    window.localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify({ width: 9000, height: 9000 }))
+    setViewport(true, 900, 800)
+    const { container } = renderPanel()
+    open()
+
+    const box = panelBox(container)!
+    expect(Number.parseInt(box.style.width)).toBeLessThanOrEqual(900)
+  })
+
+  it('survives corrupt stored size', () => {
+    window.localStorage.setItem(PANEL_SIZE_KEY, 'not json')
+    const { container } = renderPanel()
+    open()
+    expect(panelBox(container)!.style.width).toBe(`${MIN_WIDTH}px`)
+  })
+
+  it('offers no handle on a phone, where the panel is full-screen', () => {
+    setViewport(false)
+    renderPanel()
+    open()
+    expect(screen.queryByRole('separator', { name: /resize/i })).toBeNull()
   })
 })

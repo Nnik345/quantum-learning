@@ -54,8 +54,15 @@ export interface Track {
 export const sectionStatus = (s: Section): SectionStatus =>
   s.status ?? (s.blocks && s.blocks.length > 0 ? 'done' : 'placeholder')
 
-/** Fraction of sections that have real content — drives the progress pips on index cards. */
-export function topicProgress(topic: Topic): { done: number; total: number } {
+/**
+ * How many of a topic's sections have been written.
+ *
+ * This measures AUTHORING, not reading — it was what drove the pips on the index cards while
+ * content was still being drafted. Every topic is written now, so it reports complete everywhere;
+ * learner progress is a separate thing entirely, in src/learning/useProgress.ts. Kept because it
+ * still earns its place the moment a new stub topic is added.
+ */
+export function authoredSections(topic: Topic): { done: number; total: number } {
   const done = topic.sections.filter((s) => sectionStatus(s) !== 'placeholder').length
   return { done, total: topic.sections.length }
 }

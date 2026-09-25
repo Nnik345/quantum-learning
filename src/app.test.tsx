@@ -30,10 +30,19 @@ const renderAt = (path: string) =>
   )
 
 describe('routes', () => {
-  it('renders the home page', () => {
+  it('renders the path as the home page', () => {
     renderAt('/')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/quantum computing/i)
-    expect(screen.getByRole('link', { name: /open the circuit lab/i })).toBeDefined()
+    // The front door is now the journey, not three parallel tracks.
+    expect(screen.getByRole('progressbar')).toBeDefined()
+    expect(screen.getByText(/Start here/i)).toBeDefined()
+  })
+
+  it('renders the reference index', () => {
+    renderAt('/reference')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Reference')
+    expect(screen.getByText('Basic Maths')).toBeDefined()
+    expect(screen.getByText('Algorithms')).toBeDefined()
   })
 
   it('renders a track index listing every topic', () => {

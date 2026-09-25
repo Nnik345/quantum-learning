@@ -2,7 +2,8 @@ import { useEffect } from 'react'
 import { Link, Route, Routes, useLocation } from 'react-router-dom'
 
 import { Header } from './components/layout/Header'
-import { Home } from './routes/Home'
+import { PathHome } from './routes/PathHome'
+import { Reference } from './routes/Reference'
 import { TrackIndex } from './routes/TrackIndex'
 import { TopicPage } from './routes/TopicPage'
 import { CircuitBoard } from './circuit/CircuitBoard'
@@ -15,7 +16,8 @@ export default function App() {
       <Header />
       <main className="flex-1">
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<PathHome />} />
+          <Route path="/reference" element={<Reference />} />
           <Route path="/circuit" element={<CircuitBoard />} />
           <Route path="/:trackId" element={<TrackIndex />} />
           <Route path="/:trackId/:slug" element={<TopicPage />} />

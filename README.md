@@ -6,10 +6,45 @@ circuit simulator.
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 299 tests
+npm test           # 376 tests
 npm run eval       # scores the tutor against a live Ollama
 npm run build
 ```
+
+## The learning path
+
+The front page is a guided route through all 22 topics rather than three parallel tracks. Maths and
+theory are interleaved with the algorithms that consume them, so the first real algorithm arrives at
+step 9 instead of after all the theory.
+
+| Stage | Steps | |
+| --- | --- | --- |
+| Foundations | 1-3 | Complex Numbers, Vectors & Matrices, Eigenvalues & Eigenvectors |
+| One Qubit | 4-9 | Dirac, Bloch Sphere, Gates, Probability, Measurement, **Quantum Random Numbers** |
+| Many Qubits | 10-14 | Tensor Products, Entanglement, **Bell, Superdense, Teleportation** |
+| Oracles | 15-18 | **Deutsch, Deutsch-Jozsa, Bernstein-Vazirani, Simon** |
+| Amplitude & Phase | 19-21 | **Grover, QFT, Phase Estimation** |
+| Synthesis | 22 | **Shor** |
+
+`src/content/path.ts` is the only place order is written down. Step numbers, progress totals,
+prev/next links and the whole front page derive from it, so reordering a stage is moving a line. A
+test asserts every topic in `TRACKS` appears exactly once - add a topic and forget to place it, and
+the build fails rather than a reader silently never seeing it.
+
+**Prerequisites are derived, not declared.** A topic's prerequisites are simply the topics before it.
+A hand-written dependency graph would be more precise, but it is a second ordering that can drift
+from this one with nothing to catch it.
+
+**Nothing is locked.** Landing on a topic whose groundwork you have not read shows a notice naming
+the nearest few, and the content renders underneath it regardless. Locking would obstruct anyone
+with prior knowledge - and since progress lives in `localStorage`, clearing site data would lock a
+returning reader out of everything they had already read.
+
+**Progress is two things.** Visiting a topic is recorded automatically so the path shows signs of
+life immediately; completion needs the button at the foot of the page, so "done" keeps meaning
+something rather than "glanced at". Both live in `localStorage` under
+`quantum-learning:progress:v1`, and unknown slugs are dropped on read so a renamed topic can never
+mark a real step complete.
 
 ## Status
 
@@ -21,6 +56,7 @@ npm run build
 | Theory track (`/theory`) | Structure complete, **content is placeholder** |
 | Algorithms (`/algorithms`) | Complete — 12 algorithms, each with a runnable circuit |
 | Tutor (local LLM) | Complete — needs Ollama running |
+| Learning path | Complete — 22 guided steps, progress tracked locally |
 
 ## Conventions
 
@@ -169,7 +205,12 @@ proposal goes through `checkPlacement`, gets simulated, and the panel displays t
 If the model claims a Bell state and the simulation disagrees, the simulation is what you see.
 `deserialiseCircuit` already did this job for corrupt files — model output is the same trust category.
 
-Its four tools are read-only or validated. None writes a file, runs code, or makes a network call, so
+**It can see the page you are on.** `get_current_page` returns the lesson text plus every worked
+circuit printed on it — each preset's id, its gates, and what it actually produces — so "explain
+this circuit" works on a lesson page and not only in the Lab. `run_simulation` takes a preset id, so
+exact numbers for a page's circuit are computed rather than read off the diagram.
+
+Its five tools are read-only or validated. None writes a file, runs code, or makes a network call, so
 a hostile question can do no worse than draw a silly circuit.
 
 Reasoning is on for circuit building, hidden behind a "show reasoning" toggle, and off for ordinary
@@ -251,19 +292,46 @@ tied to "leftmost" rather than banning a word.
 Worth keeping as a reminder of what keyword scoring can and cannot do: it caught nothing real there,
 and only the circuit cases, scored by simulation, prove anything.
 
-### On reading the score
+### The Grover case, and a test that was lying
 
-The set currently passes **12/12**, reproducibly. That is not a guarantee of correctness — twelve
+`grover` failed for a long time, and chasing it turned up a worse problem than the failure.
+
+**The model's mistake.** Grover's circuit is a stack of layers where nearly every layer has one gate
+*per wire* — `H,H`, `X,X`, `H,H`. The exception is the controlled-Z, which is a single gate spanning
+both wires. The model applied the per-wire pattern uniformly and wrote the controlled-Z once for
+each wire. Since a controlled-Z is symmetric, that is the same gate twice, which cancels — the
+oracle silently disappeared and the search stopped searching.
+
+It is not a knowledge gap. Asked directly, the model explains correctly that a controlled-Z is
+symmetric; given the layer structure explicitly, it builds a flawless Grover. It simply misremembers
+the shape when recalling it unaided.
+
+**The test could not tell Grover from a lookalike.** The check was only "does it reach |11⟩?", and
+
+    H,H | X,X | Z,Z | X,X | H,H
+
+reaches |11⟩ with certainty while containing no controlled gate at all — nothing marks anything, so
+no search happens. That circuit passed. Which means "grover passed" never established that Grover
+had been built, and an earlier 12/12 reported here rested on a check that admitted fakes.
+
+Both are fixed. The case now also requires at least one controlled gate and a superposition to
+search over, so a lookalike fails on structure regardless of where it lands; and the system prompt
+carries a worked Grover, with the controlled-Z layer called out explicitly. The model now produces
+a genuine search — `|11⟩ 100.0% via 2 controlled gate(s)` — reproducibly.
+
+The lesson generalises past this one case: scoring a circuit by its output alone tests the
+destination, not the journey. Where structure is what makes an algorithm that algorithm, the check
+has to look at the structure. That is not a guarantee of correctness — twelve
 cases is a smoke test, and the text half of it only checks that expected words appear.
 
-What it does establish is that the circuits are right, because those cases are scored by running
-the generated circuit through the simulator. And a failure would mean the model built the wrong
-circuit, not that a wrong circuit reaches a reader: the panel always displays what the simulator
-computed, so a mistake shows up as a diagram that visibly does something else.
+Twelve cases is a smoke test, and the text half only checks that expected words appear. What it does
+establish is whether the circuits are right — those cases are scored by running the generated circuit
+through the simulator, and where the structure is what makes an algorithm that algorithm, by checking
+the structure too.
 
 ## Tests
 
-`npm test` runs 299 tests: the simulator against known results (Bell and GHZ states, the full
+`npm test` runs 376 tests: the simulator against known results (Bell and GHZ states, the full
 Toffoli truth table, CNOT in both wire directions to catch bit-order bugs, norm preservation,
 reduced density matrices, seeded sampling, non-adjacent SWAP and Fredkin, the six input presets
 against their Bloch positions), the circuit editing rules, and page-level tests that drive the real

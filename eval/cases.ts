@@ -58,10 +58,15 @@ export const EVAL_CASES: EvalCase[] = [
     id: 'ghz',
     intent: 'Extends entanglement to three qubits',
     prompt: 'Make a 3-qubit GHZ state.',
-    check: (r) => ({
-      pass: near(p(r, '000'), 50) && near(p(r, '111'), 50),
-      detail: `|000⟩ ${p(r, '000').toFixed(1)}%, |111⟩ ${p(r, '111').toFixed(1)}%`,
-    }),
+    check: (r) => {
+      const entangled = (r.outcome?.entangled ?? []).length === 3
+      return {
+        pass: near(p(r, '000'), 50) && near(p(r, '111'), 50) && entangled,
+        detail: `|000⟩ ${p(r, '000').toFixed(1)}%, |111⟩ ${p(r, '111').toFixed(1)}%, ${
+          entangled ? 'all three entangled' : 'NOT fully entangled'
+        }`,
+      }
+    },
   },
   {
     kind: 'circuit',
@@ -79,12 +84,36 @@ export const EVAL_CASES: EvalCase[] = [
   {
     kind: 'circuit',
     id: 'grover',
-    intent: 'A known algorithm with an exact answer',
+    intent: 'A known algorithm with an exact answer — and an actual search, not a lookalike',
     prompt: 'Build a 2-qubit Grover search that finds the marked state |11>, with one iteration.',
-    check: (r) => ({
-      pass: p(r, '11') > 95,
-      detail: `|11⟩ ${p(r, '11').toFixed(1)}% (expected ~100%)`,
-    }),
+    /*
+     * Landing on |11⟩ is necessary but nowhere near sufficient.
+     *
+     * A circuit of H,H | X,X | Z,Z | X,X | H,H reaches |11⟩ with certainty and contains no
+     * controlled gate at all — so nothing marks anything and no search happens. The original check
+     * passed exactly that circuit, which meant "grover passed" never established that Grover was
+     * built. Searching requires something that couples the wires, so the structure is checked too.
+     */
+    check: (r) => {
+      const gates = r.circuit?.placements ?? []
+      const controlled = gates.filter((g) => g.controls.length > 0)
+      const hadamards = gates.filter((g) => g.gate === 'H')
+      const found = p(r, '11')
+
+      const problems = [
+        found > 95 ? '' : `|11⟩ only ${found.toFixed(1)}%`,
+        controlled.length > 0 ? '' : 'no controlled gate — nothing marks the answer, so it is not a search',
+        hadamards.length >= 2 ? '' : 'no superposition to search over',
+      ].filter(Boolean)
+
+      return {
+        pass: problems.length === 0,
+        detail:
+          problems.length === 0
+            ? `|11⟩ ${found.toFixed(1)}% via ${controlled.length} controlled gate(s) — a real search`
+            : problems.join('; '),
+      }
+    },
   },
   {
     kind: 'circuit',

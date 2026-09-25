@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { NavLink, Link } from 'react-router-dom'
 
+/**
+ * Three entries, not four tracks. The path is the way through; reference is for browsing once you
+ * know what you are looking for.
+ */
 const NAV = [
-  { to: '/math', label: 'Maths' },
-  { to: '/theory', label: 'Theory' },
+  { to: '/', label: 'Path', exact: true },
+  { to: '/reference', label: 'Reference' },
   { to: '/circuit', label: 'Circuit Lab' },
-  { to: '/algorithms', label: 'Algorithms' },
 ]
 
 export function Header() {
@@ -29,7 +32,7 @@ export function Header() {
 
         <nav className="ml-auto hidden items-center gap-1 md:flex">
           {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} className={linkClass}>
+            <NavLink key={item.to} to={item.to} end={item.exact} className={linkClass}>
               {item.label}
             </NavLink>
           ))}
@@ -52,6 +55,7 @@ export function Header() {
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.exact}
               className={linkClass}
               onClick={() => setOpen(false)}
             >

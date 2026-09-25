@@ -60,6 +60,11 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
     '',
     '## How to work',
     '',
+    '- When the reader says "this", "here", "the circuit above", or asks anything about the page they',
+    '  are on, call get_current_page FIRST. It returns the lesson text AND every worked circuit',
+    '  printed on it, with each circuit\'s preset id, its gates, and what it actually produces.',
+    '- To quote exact numbers for a circuit on the page, call run_simulation with that preset id.',
+    '  Never read amplitudes off a diagram or recall them.',
     '- ALWAYS call search_content before answering a conceptual question — what something is, why it',
     '  works, how it compares. Answer from what it returns. Your own recollection is not good enough',
     '  here: the site has its own conventions and emphases, and an answer that ignores them will be',
@@ -90,6 +95,21 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
     'Applying H to both wires instead is a common mistake and does NOT entangle them — it gives four',
     'equally likely outcomes with every qubit still in a pure state of its own.',
     '',
+    'Grover searching two wires for |11>. Read the shape: every layer has one gate PER WIRE, except',
+    'the controlled-Z layers, which are ONE gate spanning both wires. Writing a controlled-Z once',
+    'per wire writes the same gate twice, and it cancels to nothing — the marking silently vanishes.',
+    '',
+    '  layers:  H,H | CZ | H,H | X,X | CZ | X,X | H,H',
+    '',
+    '  { "numQubits": 2, "gates": [',
+    '      { "gate": "H", "targets": [0], "column": 0 }, { "gate": "H", "targets": [1], "column": 0 },',
+    '      { "gate": "Z", "targets": [1], "controls": [0], "column": 1 },',
+    '      { "gate": "H", "targets": [0], "column": 2 }, { "gate": "H", "targets": [1], "column": 2 },',
+    '      { "gate": "X", "targets": [0], "column": 3 }, { "gate": "X", "targets": [1], "column": 3 },',
+    '      { "gate": "Z", "targets": [1], "controls": [0], "column": 4 },',
+    '      { "gate": "X", "targets": [0], "column": 5 }, { "gate": "X", "targets": [1], "column": 5 },',
+    '      { "gate": "H", "targets": [0], "column": 6 }, { "gate": "H", "targets": [1], "column": 6 } ] }',
+    '',
     '## Site contents',
     '',
     contentsOutline(),
@@ -101,9 +121,11 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
       '## Where the reader is right now',
       '',
       context.topicTitle
-        ? `They are reading "${context.topicTitle}" at ${context.path ?? 'a topic page'}. If they say`
-        : `They are on ${context.path}. If they say`,
-      '"this" or "here" without saying what, assume they mean this page.',
+        ? `They are reading "${context.topicTitle}" at ${context.path ?? 'a topic page'}.`
+        : `They are on ${context.path}.`,
+      'If they say "this" or "here" without saying what, they mean this page — call',
+      'get_current_page rather than guessing, and rather than answering from memory. That is also',
+      'how you see any circuit printed on the page.',
     )
   }
   if (context.hasCircuit) {
@@ -118,3 +140,16 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
 
 /** Rough token estimate, for keeping an eye on the context budget. */
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4)
+
+/**
+ * How large the system prompt is allowed to get.
+ *
+ * A quarter of the 8k context window. The rest has to hold up to two retrieved topics (~3000
+ * tokens together), the conversation so far, and the answer — so this is the share the prompt can
+ * take without squeezing the content it exists to talk about.
+ *
+ * Stated as an absolute number rather than a fraction because that is how it gets discussed, and
+ * because it should not quietly double if the context window is ever raised. Raising the window is
+ * a reason to hold more *content*, not to write a longer prompt.
+ */
+export const MAX_SYSTEM_PROMPT_TOKENS = 2048

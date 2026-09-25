@@ -5,6 +5,7 @@ import { getTopic } from '../content/registry'
 import { DEFAULT_MODEL } from '../lib/llm/client'
 import { useAssistant } from './useAssistant'
 import { MessageView } from './MessageView'
+import { usePanelSize } from './usePanelSize'
 
 const STATUS_LABEL: Record<string, string> = {
   thinking: 'Thinking…',
@@ -41,6 +42,7 @@ export function AssistantPanel() {
   }, [location.pathname])
 
   const { messages, status, health, send, stop, clear, checkHealth } = useAssistant(context)
+  const panel = usePanelSize()
   const busy = status !== 'idle'
 
   // Only reach for Ollama once the reader actually opens the panel — a visitor who never asks a
@@ -79,7 +81,39 @@ export function AssistantPanel() {
   }
 
   return (
-    <div className="fixed bottom-0 right-0 z-40 flex h-[min(620px,100dvh)] w-full flex-col border-l border-t border-line bg-surface shadow-2xl sm:bottom-5 sm:right-5 sm:h-[620px] sm:w-[420px] sm:rounded-xl sm:border">
+    <div
+      style={panel.style}
+      className={[
+        'fixed bottom-0 right-0 z-40 flex h-[min(620px,100dvh)] w-full flex-col border-l border-t',
+        'border-line bg-surface shadow-2xl sm:bottom-5 sm:right-5 sm:h-[620px] sm:w-[420px]',
+        'sm:rounded-xl sm:border',
+        // No transition while dragging, or the panel lags behind the pointer.
+        panel.resizing ? '' : 'transition-[width,height] duration-100',
+      ].join(' ')}
+    >
+      {panel.isDesktop && (
+        <div
+          role="separator"
+          aria-label="Resize the tutor. Drag, or use the arrow keys."
+          aria-orientation="vertical"
+          tabIndex={0}
+          onPointerDown={panel.startResize}
+          onKeyDown={panel.nudge}
+          onDoubleClick={panel.reset}
+          title={
+            panel.isDefaultSize
+              ? 'Drag to enlarge — double-click to reset'
+              : `${panel.size.width} × ${panel.size.height} — double-click to reset`
+          }
+          className="absolute -left-1 -top-1 z-10 size-5 cursor-nwse-resize rounded-tl-xl focus:outline-none"
+        >
+          {/* Two short strokes reading as a corner grip, brightening on hover and focus. */}
+          <svg viewBox="0 0 20 20" className="size-full text-line-bright hover:text-cyan" aria-hidden>
+            <path d="M4 13 L4 4 L13 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <path d="M8 16 L8 8 L16 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
+          </svg>
+        </div>
+      )}
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="text-sm font-medium text-ink">Tutor</span>
         <span className="truncate text-[10px] text-ink-faint">
