@@ -1,92 +1,416 @@
-# Quantum Learning
+# QuantumLearn
 
-An interactive site for learning quantum computing: maths foundations, theory, and a working
-circuit simulator.
+An interactive site for learning quantum computing, from complex numbers to Shor's algorithm. It has
+a real state-vector simulator, a drag-and-drop circuit board, auto-graded exercises, a tutor that
+runs on a local LLM, and a Qiskit course you work through by typing the code yourself.
 
-```bash
+Everything runs on your own machine. Nothing is sent anywhere.
+
+> **Status: proof of concept.** All 22 lessons are written and the simulator is thoroughly tested,
+> but this is a local development project, not a deployed product. See [Security](#security) before
+> exposing any part of it.
+
+---
+
+## Contents
+
+| Section | What it covers |
+| --- | --- |
+| [What you can do](#what-you-can-do) | The four things this site is |
+| [Setup](#setup) | **Start here.** Three tiers, each usable on its own |
+| [Running it](#running-it) | Day-to-day commands and ports |
+| [Sharing it for testing](#sharing-it-for-testing) | Letting someone else try it over SSH |
+| [The learning path](#the-learning-path) | 22 steps across 6 stages |
+| [Exercises](#exercises) | How auto-grading works, and why it grades behaviour |
+| [The Circuit Lab](#the-circuit-lab) | The simulator and the board |
+| [The AI tutor](#the-ai-tutor) | Model, tools, and the rule that keeps it honest |
+| [Python and Qiskit](#python-and-qiskit) | The guide, the playground, and the bit-order flip |
+| [Conventions](#conventions) | Qubit ordering and measurement — read before comparing to Qiskit |
+| [Repository layout](#repository-layout) | Where everything lives |
+| [Writing content](#writing-content) | Adding or editing lessons |
+| [Tests and evaluation](#tests-and-evaluation) | 533 tests, plus a live-model eval |
+| [What was measured](#what-was-measured) | Findings that changed decisions |
+| [Future work](#future-work) | What is worth doing next |
+| [Security](#security) | The honest limits |
+
+---
+
+## What you can do
+
+**Follow a path.** 22 lessons in one order that makes sense, with maths and theory interleaved with
+the algorithms that use them. Progress is remembered locally.
+
+**Build circuits.** A board with 15 gates and up to 8 qubits, showing the state vector, probabilities,
+per-qubit Bloch vectors and sampled shots as you drag. Every algorithm on the site ships a circuit you
+can open and take apart.
+
+**Get checked.** Exercises grade what your circuit *does*, not how you arranged it.
+
+**Ask.** A tutor running on a local model that reads the site's own pages, looks up verified circuits,
+and checks anything it builds against the simulator before showing it.
+
+**Write Qiskit.** A six-lesson course with real Qiskit 2.5.2 running locally, plus an open playground.
+Circuits you build in Python load straight onto the board.
+
+---
+
+## Setup
+
+Three tiers. **Tier 1 alone gives you a fully working site** — lessons, circuit lab, exercises,
+progress. Tiers 2 and 3 add the tutor and Python; without them those pages show a notice explaining
+what to start, and nothing else breaks.
+
+### Prerequisites
+
+| | Version | Needed for | Notes |
+| --- | --- | --- | --- |
+| Node.js | 20+ | Tier 1 | Tested on 26.8.2 |
+| Ollama | 0.34+ | Tier 2 | Tested on 0.34.4 |
+| GPU | ~8 GB VRAM | Tier 2 | Tested on an RTX 3060 12 GB. CPU works but is slow |
+| Python | 3.10–3.14 | Tier 3 | Tested on 3.14.7 |
+| pyenv | any | Tier 3 | Or any environment manager you prefer |
+| bubblewrap | any | Tier 3 | Sandboxes submitted code. **Required by default** |
+
+### Tier 1 — the site
+
+```sh
+git clone <this repo>
+cd quantum-learning
 npm install
-npm run dev        # http://localhost:5173
-npm test           # 376 tests
-npm run eval       # scores the tutor against a live Ollama
-python pyserver/server.py   # the Python service, for the /python page
-npm run build
+npm run dev
+```
+
+Open **http://localhost:5173**. You should see the landing page with a `22 / 6 / 12 / 15 / 8` stats
+row. The path, the Circuit Lab and the exercises all work now. Stop here if that is all you want.
+
+### Tier 2 — the AI tutor
+
+Install Ollama and pull the model. On Arch:
+
+```sh
+sudo pacman -S ollama-cuda        # or `ollama` for CPU-only
+sudo systemctl enable --now ollama
+ollama pull qwen3.5:9b            # ~6.6 GB, Q4_K_M
+```
+
+Check it landed entirely on the GPU:
+
+```sh
+ollama ps
+```
+
+The **PROCESSOR** column should read `100% GPU`. Any CPU percentage means the model spilled out of
+VRAM and generation will be several times slower — on a 12 GB card this model has 4 GB to spare, so
+that should not happen.
+
+Optionally, `sudo systemctl edit ollama`:
+
+```ini
+[Service]
+Environment="OLLAMA_KEEP_ALIVE=30m"
+Environment="OLLAMA_NUM_PARALLEL=1"
+```
+
+Reload the site and click **Ask** in the bottom right. `OLLAMA_MODEL` and `OLLAMA_NUM_CTX` override
+the defaults if you want to try another model.
+
+### Tier 3 — Python with real Qiskit
+
+Qiskit cannot run in a browser: its Rust core (`qiskit._accelerate`) publishes no WebAssembly wheel,
+and `qiskit-terra` has never published a pure-Python one — so `micropip.install("qiskit")` fails at
+every version. Python therefore runs in a small local service, the same shape as Ollama.
+
+```sh
+sudo pacman -S bubblewrap             # apt install bubblewrap on Debian/Ubuntu
+
+pyenv virtualenv 3.14.7 quantum-learning
+pyenv local quantum-learning          # writes .python-version, which is gitignored
+pip install -r pyserver/requirements.txt
+```
+
+Then start it in its own terminal:
+
+```sh
+python pyserver/server.py
+```
+
+It listens on `127.0.0.1:8000` and prints `sandboxed with bubblewrap` on startup. Visit
+**http://localhost:5173/python** — the header should read
+`● Qiskit 2.5.2 on Python 3.14.7 · 15s limit per run · sandboxed`. A red warning there means code
+would run unprotected; see [Security](#security).
+
+Python 3.14.7 is verified: `qiskit` ships an `abi3` wheel valid for 3.10+, lists 3.14 in its
+classifiers, and `numpy`, `scipy` and `rustworkx` all publish `cp314` linux wheels — nothing compiles
+from source. 3.13 works too if you prefer.
+
+---
+
+## Running it
+
+Three processes, each in its own terminal:
+
+| Service | Command | Port | Without it |
+| --- | --- | --- | --- |
+| Site | `npm run dev` | 5173 | nothing works |
+| Ollama | `systemctl start ollama` | 11434 | the tutor says it is offline |
+| Python | `python pyserver/server.py` | 8000 | the Python pages say what to start |
+
+The browser only ever talks to the Vite origin; `/ollama` and `/pyserver` are proxied to the two
+services. That means **no CORS to configure**, and an SSH tunnel needs no code change:
+
+```sh
+ssh -L 11434:localhost:11434 user@gpu-box
+```
+
+Because the proxy runs inside the Vite process, `localhost` means *the machine Vite is on*. The Python
+service needs no GPU, so running it next to Vite is simplest even when Ollama is elsewhere. `OLLAMA_URL`
+and `PY_URL` retarget them.
+
+| Script | Does |
+| --- | --- |
+| `npm run dev` | Dev server |
+| `npm test` | 533 tests. Never needs Ollama or Python |
+| `npm run test:watch` | Same, watching |
+| `npm run typecheck` | `tsc -b --noEmit` |
+| `npm run build` | Typecheck then production build |
+| `npm run eval` | Scores the tutor against a live Ollama (14 cases) |
+
+---
+
+## Sharing it for testing
+
+Give a tester an SSH tunnel to the dev server. Nothing else needs to change:
+
+```sh
+# on the tester's machine
+ssh -L 5173:localhost:5173 you@your-box
+```
+
+They open `http://localhost:5173` and get the whole site, including Python. Their code runs in the
+sandbox, and their browser sends an origin the service already allows.
+
+Two rules:
+
+- **Tunnel 5173 only.** Never expose 8000 or 11434. The site reaches both through the Vite proxy.
+- **Check the sandbox is on first.** The Python page says `· sandboxed` when it is, and shows a red
+  warning when it is not. Do not share a page showing that warning — submitted code would run with
+  your permissions.
+
+Serving on a LAN address instead (`npm run dev -- --host`) means telling the service about it, since
+the origin changes:
+
+```sh
+PY_ALLOWED_ORIGINS=http://192.168.1.50:5173 python pyserver/server.py
 ```
 
 ## The learning path
 
-The front page is a guided route through all 22 topics rather than three parallel tracks. Maths and
-theory are interleaved with the algorithms that consume them, so the first real algorithm arrives at
-step 9 instead of after all the theory.
+The front page is one ordered route rather than three parallel tracks, so nobody has to work out that
+complex numbers come before Dirac notation. Maths and theory are interleaved with the algorithms that
+consume them — the first real algorithm arrives at **step 9**, not after all the theory.
 
-| Stage | Steps | |
+| Stage | Steps | Ends with |
 | --- | --- | --- |
-| Foundations | 1-3 | Complex Numbers, Vectors & Matrices, Eigenvalues & Eigenvectors |
-| One Qubit | 4-9 | Dirac, Bloch Sphere, Gates, Probability, Measurement, **Quantum Random Numbers** |
-| Many Qubits | 10-14 | Tensor Products, Entanglement, **Bell, Superdense, Teleportation** |
-| Oracles | 15-18 | **Deutsch, Deutsch-Jozsa, Bernstein-Vazirani, Simon** |
-| Amplitude & Phase | 19-21 | **Grover, QFT, Phase Estimation** |
-| Synthesis | 22 | **Shor** |
+| Foundations | 1–3 | Eigenvalues, and measurement as a postulate |
+| One Qubit | 4–9 | A quantum random number generator you can run |
+| Many Qubits | 10–14 | Teleportation |
+| Oracles & Query Complexity | 15–18 | Simon's algorithm — the first separation that survives randomisation |
+| Amplitude & Phase | 19–21 | Phase estimation |
+| Synthesis | 22 | Shor's algorithm |
 
-`src/content/path.ts` is the only place order is written down. Step numbers, progress totals,
-prev/next links and the whole front page derive from it, so reordering a stage is moving a line. A
-test asserts every topic in `TRACKS` appears exactly once - add a topic and forget to place it, and
-the build fails rather than a reader silently never seeing it.
+22 topics across three tracks (`/math`, `/theory`, `/algorithms`), all written — 97 sections, 371
+content blocks, no placeholders. `/reference` browses them by kind instead of by order; `/path` shows
+the route. Progress lives in `localStorage`; the path shows prerequisites as a notice, never a lock.
 
-**Prerequisites are derived, not declared.** A topic's prerequisites are simply the topics before it.
-A hand-written dependency graph would be more precise, but it is a second ordering that can drift
-from this one with nothing to catch it.
+---
 
-**Nothing is locked.** Landing on a topic whose groundwork you have not read shows a notice naming
-the nearest few, and the content renders underneath it regardless. Locking would obstruct anyone
-with prior knowledge - and since progress lives in `localStorage`, clearing site data would lock a
-returning reader out of everything they had already read.
+## Exercises
 
-**Progress is two things.** Visiting a topic is recorded automatically so the path shows signs of
-life immediately; completion needs the button at the foot of the page, so "done" keeps meaning
-something rather than "glanced at". Both live in `localStorage` under
-`quantum-learning:progress:v1`, and unknown slugs are dropped on read so a renamed topic can never
-mark a real step complete.
+Six exercises, one per stage, embedded in the lessons. Three kinds: a numeric **value** question, a
+**predict** question about a circuit's outcome, and **build/fix** tasks that hand off to the Circuit
+Lab.
 
-## Status
+**They grade behaviour, never position.** Your circuit is run and compared with a reference, so gates
+in different columns, a different decomposition, a mirrored construction or a stray measurement all
+pass — only a circuit that does the wrong thing fails. Three modes, because choosing wrongly is the
+main way to be unfair:
 
-| Area | State |
+- `state` — reach this state. Used when the prompt names one.
+- `operation` — behave correctly on **every** input, not just `|0…0⟩`. Used for oracles.
+- `distribution` — match these outcome probabilities, whatever the phases. Used when the prompt is
+  about measurement results, so a task asking for "50% on each outcome" accepts `|−⟩` as readily as `|+⟩`.
+
+Exercises can only use what the site has taught by that step. `src/content/syllabus.ts` derives that
+envelope from the content itself and a test enforces it, so a lesson cannot quietly run ahead of the
+writing. Solving is recorded separately from "mark complete", which stays the reader's own call.
+
+---
+
+## The Circuit Lab
+
+`/circuit`. Drag gates onto up to **8 qubits**; the panels update live.
+
+- **15 gates**: `I X Y Z H S S† T T† RX RY RZ P SWAP` and measurement, plus custom gates defined by a
+  matrix (`1/sqrt(2)`, `e^(i*pi/4)` are accepted, and unitarity is checked).
+- **Controls are a property of a gate**, not separate gates. A CNOT is `X` with one control, a
+  Toffoli is `X` with two, a Fredkin is `SWAP` with one.
+- **Per-wire inputs**: `|0⟩ |1⟩ |+⟩ |−⟩ |i⟩ |−i⟩` or custom amplitudes.
+- **Panels**: state vector, probabilities, per-qubit Bloch vectors, and sampled shots with a seeded RNG.
+- Step through column by column, undo/redo, import/export JSON.
+- **12 verified algorithm circuits** — QRNG, Bell, superdense coding, teleportation, Deutsch,
+  Deutsch–Jozsa, Bernstein–Vazirani, Simon, Grover, QFT, phase estimation, Shor — each checked
+  against its textbook result in `presets.test.ts`.
+
+Every gate goes through one `applyGate(state, matrix, targets, controls)` function. There are no
+per-gate special cases, which is why non-adjacent SWAP and controlled custom gates work without
+extra code.
+
+---
+
+## The AI tutor
+
+A floating panel on every page, answering against a **local** model. Nothing leaves the machine.
+
+**Model: `qwen3.5:9b` (Q4_K_M, ~6.6 GB), 8192 context, reasoning off.** All three were chosen by
+measurement, not preference — see [What was measured](#what-was-measured).
+
+### The design rule
+
+**The model proposes; the code decides.** Nothing it says about a circuit is shown as fact. Every
+proposal goes through `checkPlacement`, gets simulated, and the panel displays the **computed**
+result. If the model claims a Bell state and the simulation disagrees, the simulation is what you see.
+
+### What it can reach
+
+Nine tools, none of which execute anything you did not ask for:
+
+| Tool | Purpose |
 | --- | --- |
-| Simulator core | Complete, fully tested |
-| Circuit Lab (`/circuit`) | Complete and working |
-| Maths track (`/math`) | Structure complete, **content is placeholder** |
-| Theory track (`/theory`) | Structure complete, **content is placeholder** |
-| Algorithms (`/algorithms`) | Complete — 12 algorithms, each with a runnable circuit |
-| Tutor (local LLM) | Complete — needs Ollama running |
-| Learning path | Complete — 22 guided steps, progress tracked locally |
+| `search_content` | Whole-topic retrieval over the site, scored by term overlap, IDF and headings |
+| `open_topic` | Fetch a page by name |
+| `get_current_page` | The page you are on, with every circuit printed on it |
+| `get_reference_circuit` | One of the 12 tested circuits — gates, real outcome, and its page |
+| `propose_circuit` | Build a circuit; validated and simulated before display |
+| `get_current_circuit` | Read your board |
+| `run_simulation` | Exact amplitudes, probabilities and Bloch vectors |
+| `get_python_code` | Your editor contents, output, traceback and current task |
+| `suggest_python` | Offer code, with a button for you to insert it |
+
+It **cites its sources**: tool results carry the page path and the prompt asks for it back as a
+markdown link. `src/assistant/links.ts` then resolves every link against the real routes — external
+URLs, `javascript:`, and plausible-but-wrong internal paths all render as plain text. Model output is
+untrusted, and a citation feature is not worth making the page a launchpad for arbitrary URLs.
+
+It **cannot run Python**, deliberately. The Python service has no filesystem isolation, so letting a
+model execute code it wrote would be a real escalation from "only the user runs code". A test asserts
+no such tool exists. It also never receives an exercise's solution — a tutor that can read the answer
+will hand it over.
+
+---
+
+## Python and Qiskit
+
+Real Qiskit 2.5.2, running locally. Three places:
+
+- **`/python`** — a six-lesson guide: first circuit → superposition → measurement and shots →
+  entanglement → chained controls → Grover. You read the idea, then complete a stub yourself.
+- **`/python/<lesson>`** — one lesson, reading on the left, your editor on the right.
+- **`/python/playground`** — an open editor with no task attached.
+
+Tasks are graded by **running your code**, pulling the circuit out of Qiskit, and comparing behaviour
+with the same `gradeAgainst` the circuit exercises use. A Bell pair built on qubit 1 with the control
+reversed passes, because it is a Bell pair. Nothing compares source text.
+
+The editor is CodeMirror 6 with the Python grammar, themed from the site's own tokens and **lazily
+loaded** — a 362 KB chunk only the Python pages pay for.
+
+### The bit order, reconciled rather than warned about
+
+Qiskit is little-endian: qubit `i` has place value 2^i, so **q0 is the rightmost character** of a
+printed bitstring. This site is the reverse. `src/lib/python/qiskitOrder.ts` maps
+`siteWire = n - 1 - qiskitQubit`, and the useful consequence is that **after the flip, both systems
+print the same bitstring for the same state**:
+
+```
+Qiskit:  qc.x(0) on 3 qubits   ->  001   (qubit 0 is rightmost)
+Here:    X on wire 2 of 3      ->  001   (wire 0 is leftmost)
+```
+
+So the conversion resolves the conflict rather than papering over it, and one of the starter programs
+demonstrates exactly that. Qiskit's own output is shown verbatim; the board shows the site's
+convention; the page explains the mirroring. It lives in one function, and its tests assert that
+same-bitstring property directly — verified against real Qiskit, not assumed.
+
+Circuits come back in Qiskit's indices and go through `validateProposal`, the same validator guarding
+the tutor's circuits, which already resolves `cx`/`cz`/`ccx`/`cswap`/`cp` aliases and assigns columns.
+
+---
 
 ## Conventions
 
-**Qubit ordering.** `q0` is the top wire of a circuit and the **leftmost** symbol in a ket:
-`|q0 q1 q2⟩`. Internally qubit `q` occupies bit `n - 1 - q` of the basis index. This is textbook
-(Nielsen & Chuang) ordering and is the **reverse of Qiskit**, which prints `q0` last. If you compare
-output against Qiskit, the bitstrings will look mirrored.
+**Qubit ordering.** `q0` is the top wire and the **leftmost** symbol in a ket: `|q0 q1 q2⟩`.
+Internally qubit `q` occupies bit `n - 1 - q`. This is textbook (Nielsen & Chuang) ordering and the
+**reverse of Qiskit**. Three layers defend it: the convention is in the system prompt, tool results
+always report bitstrings through the site's own `basisLabel`, and an eval case fails outright if
+"q0 is |1⟩" comes back as `001`.
 
 **Measurement.** A pure state-vector simulator cannot represent a post-measurement mixed state, so
-the two honest views are kept separate:
+two honest views are kept separate:
 
-- The State / Probabilities / Bloch panels show the exact **pre-measurement** state, with
-  measurement gates treated as no-ops. The UI says so whenever a measurement is present.
-- The Shots panel runs the circuit per-shot with a seeded RNG, collapsing at each measurement gate.
-  That is the correct answer for circuits with mid-circuit measurement.
+- State / Probabilities / Bloch show the exact **pre-measurement** state, with measurement gates
+  treated as no-ops. The UI says so whenever a measurement is present.
+- **Shots** runs the circuit per-shot with a seeded RNG, collapsing at each measurement gate. That is
+  the correct answer for circuits with mid-circuit measurement.
+
+**No classical feedforward.** A measurement result cannot control a later gate. Protocols that need
+it, such as teleportation, use quantum controls instead (deferred measurement), and say so.
+
+---
+
+## Repository layout
+
+```
+pyserver/            Python service — real Qiskit, behind a Vite proxy
+  server.py            FastAPI: /health and /run
+  runner.py            Executes one submission in a throwaway subprocess
+  requirements.txt     Pinned qiskit, fastapi, uvicorn
+
+eval/                Live-model eval harness (not part of npm test)
+
+src/
+  lib/quantum/       Simulator core — pure TypeScript, no React
+    complex.ts         Complex arithmetic
+    matrix.ts          Matrix ops + the U†U = I unitarity check
+    state.ts           State vector, applyGate, partial trace, Bloch vectors
+    gates.ts           Built-in gate library
+    circuit.ts         Circuit model and placement rules
+    builder.ts         Terse builders for writing circuits in source
+    simulate.ts        Analytic run + shot sampling
+    equivalence.ts     Behavioural comparison — the grading engine
+    presets.ts         12 verified algorithm circuits
+    persist.ts         Save/load, custom gates re-validated on load
+  lib/llm/           The tutor: client, tools, retrieval, prompt, validator
+  lib/python/        Python client, the Qiskit bit-order flip, the tutor bridge
+  circuit/           The Circuit Lab UI
+  content/           Lessons, exercises, Python lessons, syllabus, grading
+  components/        Tex, Bloch sphere, CodeMirror editor, layout
+  learning/          Progress tracking and exercise rendering
+  routes/            Page components
+```
+
+---
 
 ## Writing content
 
-All Maths and Theory content is plain data. There is no JSX to edit and nothing to register by hand
-— the index pages, sidebars, anchors and prev/next links are all derived from these files.
+All lesson content is plain data — no JSX to edit and nothing to register by hand. Index pages,
+sidebars, anchors and prev/next links are all derived from it.
 
-- `src/content/math.ts` — the Maths topics
-- `src/content/theory.ts` — the Theory topics
+- `src/content/math.ts`, `theory.ts`, `algorithms.ts` — the topics
 - `src/content/registry.ts` — track order and titles
+- `src/content/path.ts` — the 22-step route and its stages
 - `src/content/types.ts` — the block vocabulary
 
-A topic is an object with an ordered `sections` array. **Reorder** by moving a line, **add** by
-adding an object, **delete** by removing one. A section with no `blocks` renders as a visibly-marked
-placeholder.
+A topic has an ordered `sections` array. **Reorder** by moving a line, **add** by adding an object.
 
 ```ts
 {
@@ -94,270 +418,54 @@ placeholder.
   title: 'Polar Form',
   summary: 'One line, shown under the heading.',
   blocks: [
-    { kind: 'text', text: 'Prose with $inline$ LaTeX and **bold**.' },
+    { kind: 'text', text: 'Prose with $inline$ LaTeX, **bold** and `code`.' },
     { kind: 'math', tex: 'z = re^{i\\theta}', caption: 'Optional caption.' },
     { kind: 'list', items: ['Point one', 'Point two'], ordered: false },
     { kind: 'callout', tone: 'tip', title: 'Note', text: 'A highlighted aside.' },
     { kind: 'widget', widget: 'bloch-sphere', caption: 'Optional caption.' },
+    { kind: 'circuit', preset: 'grover', caption: 'A worked circuit, by preset id.' },
+    { kind: 'exercise', id: 'fix-grover-oracle' },
   ],
 }
 ```
 
-Available widget keys are in `src/content/widgets.tsx`: `bloch-sphere`, `argand-plane`,
-`matrix-playground`, `circuit-teaser`. Add a new one by writing the component and adding it to the
-`WIDGETS` map — it is then usable from any section.
+Widget keys live in `src/content/widgets.tsx`. Adding an exercise means adding an object to
+`src/content/exercises.ts` and an `exercise` block where it should appear; the syllabus test will
+fail if it needs a gate the site has not taught by that step.
 
-`complex-numbers` and `dirac-notation` each have one worked section demonstrating every block type.
-They are examples, not commitments — rewrite or delete them.
+---
 
-## Layout
-
-```
-src/
-  lib/quantum/     Simulator core — pure TypeScript, no React
-    complex.ts     Complex arithmetic
-    matrix.ts      Matrix ops + the U†U = I unitarity check
-    state.ts       State vector, applyGate, partial trace, Bloch vectors
-    gates.ts       Built-in gate library
-    circuit.ts     Circuit model and placement rules
-    simulate.ts    Analytic run + shot sampling
-    parseComplex.ts  "1/sqrt(2)", "e^(i*pi/4)" → Complex
-    persist.ts     Save/load, with custom gates re-validated on load
-  circuit/         The Circuit Lab UI
-  content/         Topic data + embeddable widgets
-  components/      Tex, BlochSphere, layout
-  routes/          Page components
-```
-
-Every gate — X, CNOT, Toffoli, SWAP, a controlled custom gate — goes through the single
-`applyGate(state, matrix, targets, controls)` function. There are no per-gate special cases.
-
-## Circuit Lab
-
-Drag gates from the palette onto the wires. Drag a placed gate to move it, or off the grid to delete
-it. Select a gate to set its angle, reassign its wires, or add controls.
-
-**Qubit inputs.** Each wire starts in a state of your choosing, set by clicking the ket button in the
-wire's gutter. Presets cover the six cardinal states — |0⟩, |1⟩, |+⟩, |−⟩, |i⟩, |−i⟩ — or enter a
-custom α and β directly (`sqrt(0.36)`, `e^(i*pi/3)/sqrt(2)`, …). A custom state must satisfy
-|α|² + |β|² = 1; if it doesn't, it is refused with a Normalise button rather than being silently
-rescaled. Inputs are per-wire, so the starting register is always a product state — an entangled
-input cannot be expressed by a per-wire control.
-
-**Non-adjacent multi-qubit gates.** SWAP and two-qubit custom gates are not restricted to
-neighbouring wires. They drop onto adjacent wires by default; move either end to any wire from the
-inspector. The wires a gate's link crosses are reserved in that column, as in standard notation, so
-nothing can be placed underneath it.
-
-- Keyboard: `Delete` removes the selection, `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo, `←` / `→` step
-  through the circuit, `Esc` deselects.
-- Click a column number to inspect the state at that point.
-- Per-qubit Bloch spheres come from the reduced density matrix, so an entangled qubit's arrow
-  visibly shrinks toward the centre. Build a Bell state and watch both collapse to the origin.
-- Custom gates are entered as a matrix. Expressions like `1/sqrt(2)`, `e^(i*pi/4)`, `(1+i)/2` and
-  `-i` are accepted, and the result must pass `U†U = I` before it can be saved.
-- The circuit autosaves to `localStorage`, and can be exported and imported as JSON.
-
-Not built: OpenQASM / Qiskit / image export. The serialiser in `circuit.ts` is kept standalone so
-these can be added without touching the UI.
-
-## The tutor
-
-A floating panel on every page, answering questions against a **local** model — nothing leaves the
-machine. It retrieves from the site's own lessons, builds circuits, reads whatever is on your board,
-and runs the simulator to check itself.
-
-### Setup
-
-```
-sudo pacman -S ollama-cuda
-sudo systemctl enable --now ollama
-ollama pull qwen3.5:9b           # ~6.6 GB, lands in /var/lib/ollama
-```
-
-Optionally, `sudo systemctl edit ollama`:
-
-```
-[Service]
-Environment="OLLAMA_KEEP_ALIVE=30m"
-Environment="OLLAMA_NUM_PARALLEL=1"
-```
-
-Check `ollama ps` reports **100% GPU**. Any CPU percentage means the model spilled out of VRAM and
-generation will be several times slower — but on a 12 GB card this model has room to spare, sitting
-at 5.7 GB resident.
-
-`OLLAMA_MODEL` and `OLLAMA_NUM_CTX` override the defaults, so a different model can be scored
-against the eval set without touching code.
-
-Running the site on another machine? Tunnel, and change nothing:
-
-```
-ssh -L 11434:localhost:11434 user@gpu-box
-```
-
-The browser only ever talks to `/ollama`, which Vite proxies to `localhost:11434` — same-origin, so
-there is no CORS to configure. `OLLAMA_URL` overrides the target.
-
-### The design rule
-
-**The model proposes; the code decides.** Nothing it says about a circuit is shown as fact. Every
-proposal goes through `checkPlacement`, gets simulated, and the panel displays the *computed* result.
-If the model claims a Bell state and the simulation disagrees, the simulation is what you see.
-`deserialiseCircuit` already did this job for corrupt files — model output is the same trust category.
-
-**It can see the page you are on.** `get_current_page` returns the lesson text plus every worked
-circuit printed on it — each preset's id, its gates, and what it actually produces — so "explain
-this circuit" works on a lesson page and not only in the Lab. `run_simulation` takes a preset id, so
-exact numbers for a page's circuit are computed rather than read off the diagram.
-
-**The site is the ground truth, not the model's memory.** `search_content` scores whole topics by
-term overlap, IDF and verbatim headings; `open_topic` fetches a page by name when the name is already
-known; and `get_reference_circuit` returns one of the twelve tested circuits — its gates, what it
-really produces, and the page it is printed on. Called blind it lists all twelve, so the model can
-find out what exists rather than needing to be told.
-
-That last tool exists because of a specific failure. Asked for Grover, the model wrote the
-controlled-Z once per wire, which is the *same gate twice* — it cancels, the marking silently
-vanishes, and the search does nothing, while a verified Grover sat in `ALGORITHM_PRESETS` the whole
-time. `propose_circuit` now takes an optional `compareTo` naming the reference being implemented, and
-reports the difference:
-
-```
-ACCEPTED: 2 qubits, 4 gates.
-DIFFERS from the verified "grover" circuit, which produces -1|11⟩ (11 100.0%).
-Yours produces 0.5|00⟩ + 0.5|01⟩ + 0.5|10⟩ + 0.5|11⟩.
-Call get_reference_circuit to see its gates, then fix yours.
-```
-
-Deliberately explicit rather than inferred: guessing which reference the reader *meant* and appending
-an unasked-for diff produces confusing contradictions when the guess is wrong.
-
-**Citations are links, and only ever to this site.** Tool results name the page they came from, and
-the prompt asks for it back as a markdown link. `src/assistant/links.ts` then resolves every href
-against the real routes — `/`, `/reference`, `/circuit`, and any `/{trackId}/{slug}` that exists — and
-anything else renders as plain text, keeping its label so no words are lost. External URLs,
-`javascript:`, protocol-relative paths and plausible-but-wrong internal paths all fail closed. Model
-output is untrusted, and a citation feature is not worth making the page a launchpad for arbitrary
-URLs.
-
-Its seven tools are read-only or validated. None writes a file, runs code, or makes a network call, so
-a hostile question can do no worse than draw a silly circuit.
-
-Reasoning is on for circuit building, hidden behind a "show reasoning" toggle, and off for ordinary
-conversation where a twenty-second pause is not worth it.
-
-## Python, with real Qiskit
-
-A six-lesson Qiskit guide you work through by typing the code yourself, plus an open playground.
-
-- `/python` — the guide: six lessons from a single gate to Grover's search
-- `/python/<lesson>` — read the idea, then complete a stub. Your code runs, and is graded
-- `/python/playground` — an open editor with no task attached
-
-**The tasks are graded by behaviour, not by text.** Your code runs, the circuit is pulled out of
-Qiskit, flipped into this site's wire order and compared against a reference with the same
-`gradeAgainst` the circuit exercises use. A Bell pair built on qubit 1 instead of qubit 0, or with the
-gates in another order, passes — because it is a Bell pair. Nothing ever compares source code.
-
-Grading has three modes, and choosing wrongly is the main way to be unfair. `state` for a task that
-names a state, `operation` for one that must hold on every input, and `distribution` for one phrased
-in terms of measurement outcomes — a task asking for "50% on each outcome" must accept |−⟩ as readily
-as |+⟩, and originally it did not.
-
-The editor is CodeMirror 6 with the Python grammar, themed from the site's own tokens and **lazily
-loaded**: it is a 362 KB chunk that only the Python pages pay for, the same arrangement three.js has.
-
-Both the guide and the playground can load whatever circuit your code built onto the board.
-
-**Qiskit cannot run in a browser.** Its Rust core (`qiskit._accelerate`) publishes no WebAssembly
-wheel, `qiskit-terra` has never published a pure-Python one, and the pure-Python `qiskit` 0.44–0.46
-wheels are metapackages that depend on `qiskit-terra` — so `micropip.install("qiskit")` fails at every
-version. Rather than ship a lookalike, Python runs in a small local service, the same shape as Ollama:
-a process on this machine behind a Vite proxy, with nothing leaving the box. No Pyodide, and **no new
-frontend dependencies**.
+## Tests and evaluation
 
 ```sh
-pyenv virtualenv 3.14.7 quantum-learning && pyenv local quantum-learning
-pip install -r pyserver/requirements.txt
-python pyserver/server.py          # its own terminal, like ollama serve
+npm test          # 533 tests across 19 files. No Ollama, no Python service
+npm run eval      # 14 cases against a live model
+npm run eval bell # just matching ids
 ```
 
-`PY_URL` retargets it exactly as `OLLAMA_URL` does. Because the proxy runs inside the Vite process,
-`localhost` means the machine Vite is on — the service needs no GPU, so running it next to Vite is
-simplest even when Ollama is on another box. When it is not running the page says so and names the
-command, rather than failing silently.
+`npm test` covers the simulator against known results (Bell and GHZ states, the full Toffoli truth
+table, CNOT in both wire directions to catch bit-order bugs, norm preservation, reduced density
+matrices, seeded sampling, non-adjacent SWAP and Fredkin), the 12 preset circuits against their
+textbook results, circuit editing rules, and page-level tests driving the real drag-and-drop.
 
-**It is a local tool, not a sandbox.** Each run is a fresh subprocess with a wall-clock timeout, an
-address-space cap, a CPU cap and its own session, which stops a runaway loop or a stray allocation.
-There is no filesystem or network isolation — that needs namespaces or a container — so it binds to
-`127.0.0.1` and `pyserver/README.md` says plainly not to expose the port.
+The tutor and Python add: the validator against malformed and hostile model output, retrieval, the
+Qiskit bit-order flip, link rendering against hostile hrefs, exercise grading including the
+correct-but-differently-shaped cases, and the whole assistant panel driven by a scripted fake model.
 
-### The tutor can read your code
+**The eval is different.** Temperature 0 and a fixed seed, so two runs are comparable. **Circuit
+cases are scored by running the generated circuit** — a pass means the physics is right, not that the
+prose sounded convincing. Text cases only check that expected words appear, which is a grounding
+smoke test and nothing more; the harness says exactly that in its own output.
 
-`src/lib/python/pythonBridge.ts` mirrors `circuitBridge`: the Python pages publish what is in the
-editor, what it printed, any traceback and the task being attempted, and the tutor reads it through
-two tools — `get_python_code` and `suggest_python`. A suggestion appears in the chat with a button;
-putting it in the editor is the user's click, never the model's.
+---
 
-**The tutor cannot run Python, deliberately.** The sandbox has no filesystem isolation, so letting a
-model execute code it wrote would be a real escalation from "only the user runs code". A test asserts
-no such tool exists. The prompt tells it to say what it expects rather than claim a fix works.
+## What was measured
 
-**It never receives the task's solution.** The bridge carries the prompt and the target as printed on
-the page, and nothing else — a tutor that can read the answer will hand it over. A test walks the
-lesson's solution and asserts none of it reaches the model.
-
-Python guidance is added to the system prompt only on a Python page, so a reader on a theory page
-pays nothing for it. That raised the prompt ceiling from 2048 to 2304 tokens for the Python case;
-the common case is unchanged at ~1980.
-
-### The bit order, reconciled rather than warned about
-
-Qiskit is little-endian: qubit `i` has place value 2^i, so **q0 is the rightmost character** in a
-printed bitstring. This site is the reverse, and says so on all 22 lesson pages.
-`src/lib/python/qiskitOrder.ts` maps `siteWire = n - 1 - qiskitQubit`, and the useful consequence is
-that **after the flip both systems print the same bitstring for the same state**:
-
-```
-Qiskit:  qc.x(0) on 3 qubits   ->  001   (qubit 0 is rightmost)
-Here:    X on wire 2 of 3      ->  001   (wire 0 is leftmost)
-```
-
-So the conversion turns the site's sharpest conflict with Qiskit into something a learner can check
-for themselves, and one of the starter programs does exactly that. Qiskit's own output is shown
-verbatim; the board shows the site's convention; the page explains the mirroring. The conversion lives
-in one function so there is exactly one place it can be wrong, and its tests assert that
-same-bitstring property directly rather than just the arithmetic.
-
-Circuits come back in Qiskit's indices and go through `validateProposal` — the same validator that
-guards the tutor's circuits, which already resolves `cx`/`cz`/`ccx`/`cswap`/`cp` aliases and assigns
-columns. Qiskit output and model output are the same trust category.
-
-### Why the ordering guard exists
-
-Qwen's training data is overwhelmingly Qiskit-flavoured, and Qiskit puts q0 **last**. Three layers
-push back: the convention is in the system prompt, tool results always report bitstrings through our
-own `basisLabel`, and an eval case fails outright if "q0 is |1⟩" comes back as `001`.
-
-### Evaluating it
-
-```
-npm run eval            # every case
-npm run eval bell       # just matching ids
-```
-
-Temperature 0 and a fixed seed, so two runs are comparable. **Circuit cases are scored by running the
-generated circuit** — a pass means the physics is right, not that the prose sounded convincing. Text
-cases only check that expected words appear, which is a grounding smoke test and nothing more; the
-harness says exactly that in its own output.
-
-`npm test` never needs Ollama.
+Findings that changed a decision, kept because each one contradicted an assumption.
 
 ### Choosing the model
 
-The eval picked it. Qwen3-14B was the original choice; Qwen3.5-9B was tried because it is a newer
-generation at two-thirds the size, and it won outright on the same twelve cases:
+The eval picked it. Qwen3-14B was the original choice; Qwen3.5-9B won outright on the same cases:
 
 | | qwen3:14b | qwen3.5:9b |
 | --- | --- | --- |
@@ -366,96 +474,99 @@ generation at two-thirds the size, and it won outright on the same twelve cases:
 | Throughput | 28 tok/s | **~50 tok/s** |
 | GPU residency | 40/41 layers | **100%** |
 | Resident size | ~10.5 GB | **6.0 GB** |
-| VRAM headroom | none (spilled at 16k) | **4.2 GB spare** |
 
 Being smaller is the point: the 14B could not hold a 16k KV cache and its own weights on a 12 GB
-card, so Ollama silently ran six layers on the CPU. The 9B fits whole, and being a newer generation
-it is also simply better at the task — it was the only model to pass `bell` and `grover` in the same
-run, which the 14B never managed at any setting.
+card, so Ollama silently ran six layers on the CPU.
 
-### Two settings that were measured rather than assumed
+### Two settings measured rather than assumed
 
-**Reasoning is off.** On Qwen3-14B it was catastrophic — 10/12 in 936s against 11/12 in 102s, with
-Grover never finishing at all. On Qwen3.5-9B it is merely not worth it: both configurations reach
-12/12, but reasoning takes 207s against 91s. Off by default; `EVAL_THINK=1` re-tests it.
+**Reasoning is off.** On the 14B it was catastrophic — 10/12 in 936s against 11/12 in 102s. On the 9B
+it is merely not worth it: both reach 12/12, but reasoning takes 207s against 91s. `EVAL_THINK=1`
+re-tests it.
 
-**Context is 8k, not 16k, despite 16k fitting.** The 9B has the VRAM for a 16k window on a 12 GB
-card. Raising it dropped the eval from 12/12 to 11/12, reproducibly across three runs, with Grover
-collapsing from 100% to 25% on the marked state; putting it back restored 12/12. A bigger window
+**Context is 8k, not 16k, despite 16k fitting.** Raising it dropped the eval to 11/12, reproducibly
+across three runs, with Grover collapsing from 100% to 25% on the marked state. A bigger window
 appears to let retrieval supply more material than the model attends to well. Fitting was never a
 reason to use it.
 
-### What the eval actually found
+### Tool schemas are advisory, not enforced
 
-Two results worth keeping, both of which contradicted an assumption:
+The circuit schema has an enum of legal gate names and the model ignored it, asking for `CZ` — which
+this palette spells as `Z` with a control. Constrained decoding shapes output; it does not guarantee
+it. **The validator is what makes model output safe.** That finding drove its forgiveness: it expands
+the aliases every model reaches for, fans a one-qubit gate given several wires into one gate per wire,
+and accepts a symmetric gate written as controls with no target.
 
-**Tool-parameter schemas are advisory, not enforced.** The circuit schema has an enum of legal gate
-names and the model ignored it repeatedly, asking for `CZ` — which this palette spells as `Z` with a
-control. Constrained decoding shapes the output; it does not guarantee it. The validator is what
-actually makes model output safe, which is why every circuit still goes through `checkPlacement` and
-gets simulated before anything is displayed.
+### A test that was lying
 
-That finding drove the validator's forgiveness: it now expands the aliases every model reaches for
-(`CNOT`, `CZ`, `CCX`, `Toffoli`, `Fredkin`, …), fans a one-qubit gate given several wires out into
-one gate per wire, and accepts a symmetric gate written as controls with no target. Each of those
-was a real failure that cost a whole retry round.
+`grover` failed for a long time, and chasing it turned up something worse than the failure.
 
-### A caught false negative
+The model wrote the controlled-Z **once per wire**, following the per-wire pattern of the surrounding
+layers. A controlled-Z is symmetric, so that is the same gate twice — it cancels, and the oracle
+silently disappears. Not a knowledge gap: asked directly, the model explains that a controlled-Z is
+symmetric; it simply misremembers the shape when recalling it unaided.
 
-The `ordering-question` case originally rejected any answer containing "rightmost". A correct,
-well-sourced answer failed it — the model said q0 is leftmost here **and** that Qiskit puts it
-rightmost, which is exactly the contrast the site's own page draws. The case now requires q0 to be
-tied to "leftmost" rather than banning a word.
+But the check was only "does it reach `|11⟩`?", and `H,H | X,X | Z,Z | X,X | H,H` reaches `|11⟩` with
+certainty while containing **no controlled gate at all**. That circuit passed. So "grover passed"
+never established that Grover had been built.
 
-Worth keeping as a reminder of what keyword scoring can and cannot do: it caught nothing real there,
-and only the circuit cases, scored by simulation, prove anything.
+Both are fixed — the case now also requires a controlled gate and a superposition to search over, and
+the prompt carries a worked Grover with the controlled-Z layer called out. The lesson generalises:
+scoring a circuit by its output alone tests the destination, not the journey. That same bug is now a
+learner-facing exercise.
 
-### The Grover case, and a test that was lying
+---
 
-`grover` failed for a long time, and chasing it turned up a worse problem than the failure.
+## Future work
 
-**The model's mistake.** Grover's circuit is a stack of layers where nearly every layer has one gate
-*per wire* — `H,H`, `X,X`, `H,H`. The exception is the controlled-Z, which is a single gate spanning
-both wires. The model applied the per-wire pattern uniformly and wrote the controlled-Z once for
-each wire. Since a controlled-Z is symmetric, that is the same gate twice, which cancels — the
-oracle silently disappeared and the search stopped searching.
+**Sandboxing.** `pyserver` has a timeout, a memory cap and a CPU cap, but no filesystem or network
+isolation. `bubblewrap` would give real isolation for a few extra flags on the existing subprocess
+call — and applied to *both* paths it would also make it safe to let the tutor run and verify code
+before suggesting it, which is the one thing it currently cannot do.
 
-It is not a knowledge gap. Asked directly, the model explains correctly that a controlled-Z is
-symmetric; given the layer structure explicitly, it builds a flawless Grover. It simply misremembers
-the shape when recalling it unaided.
+**More exercises.** Only 6 of the 22 steps have one. The machinery is built; the rest is authoring.
 
-**The test could not tell Grover from a lookalike.** The check was only "does it reach |11⟩?", and
+**More Python lessons.** The transpiler, primitives, parametrised circuits, and QFT in code.
 
-    H,H | X,X | Z,Z | X,X | H,H
+**More content.** Error correction and noise, then variational methods (VQE, QAOA). The curriculum is
+complete for its stated scope, so this is extending it rather than filling gaps.
 
-reaches |11⟩ with certainty while containing no controlled gate at all — nothing marks anything, so
-no search happens. That circuit passed. Which means "grover passed" never established that Grover
-had been built, and an earlier 12/12 reported here rested on a check that admitted fakes.
+**More interactive widgets.** Only 4 appear across 22 lessons; the Bloch sphere shows up exactly once
+outside its own page.
 
-Both are fixed. The case now also requires at least one controlled gate and a superposition to
-search over, so a lookalike fails on structure regardless of where it lands; and the system prompt
-carries a worked Grover, with the controlled-Z layer called out explicitly. The model now produces
-a genuine search — `|11⟩ 100.0% via 2 controlled gate(s)` — reproducibly.
+**Typography.** Body text on topic pages runs ~1090px at 15px — roughly 150 characters per line,
+against a usual target of 65–75. Fixing it means capping prose width while letting circuits and
+KaTeX blocks stay wide.
 
-The lesson generalises past this one case: scoring a circuit by its output alone tests the
-destination, not the journey. Where structure is what makes an algorithm that algorithm, the check
-has to look at the structure. That is not a guarantee of correctness — twelve
-cases is a smoke test, and the text half of it only checks that expected words appear.
+**Real hardware.** Circuits built here already export as Qiskit; sending one to IBM Quantum and
+comparing the result with the simulator would be a natural final lesson.
 
-Twelve cases is a smoke test, and the text half only checks that expected words appear. What it does
-establish is whether the circuits are right — those cases are scored by running the generated circuit
-through the simulator, and where the structure is what makes an algorithm that algorithm, by checking
-the structure too.
+---
 
-## Tests
+## Security
 
-`npm test` runs 376 tests: the simulator against known results (Bell and GHZ states, the full
-Toffoli truth table, CNOT in both wire directions to catch bit-order bugs, norm preservation,
-reduced density matrices, seeded sampling, non-adjacent SWAP and Fredkin, the six input presets
-against their Bloch positions), the circuit editing rules, and page-level tests that drive the real
-drag-and-drop and the input picker.
+**Submitted Python is sandboxed.** Every run goes into bubblewrap: read-only system, private scratch
+directory, no network, no view of your home. Writes outside the scratch land in an ephemeral root and
+vanish. Verified rather than assumed — a probe submitted through the service reports:
 
-The tutor adds its own: the validator against malformed and hostile model output, retrieval against
-known queries, reference lookup for all twelve circuits, link rendering against hostile hrefs, tool
-dispatch, stream parsing, and the whole panel — tool loop included — driven by a
-scripted fake model rather than a live one.
+```
+/home/<you>/.bashrc      False      /etc/passwd   False
+/home/<you>/.ssh/id_rsa  False      network       blocked
+```
+
+The sandbox is **required by default**: if bubblewrap is missing the service refuses to run code and
+says why, instead of silently falling back. `PY_SANDBOX=off` opts out deliberately, and the startup
+banner, `/health` and the page all report it.
+
+**Only the site may submit.** `/run` rejects POSTs whose `Origin` is not allowlisted, which stops a
+malicious page you happen to be visiting from driving the service through your browser. It is not
+access control — anyone with tunnel access can send what they like, and the sandbox is what protects
+you there.
+
+Both services bind to `127.0.0.1`. Share the site over a tunnel; never expose 8000 or 11434.
+
+**The tutor cannot execute anything.** It reads your code and suggests fixes; running them is your
+click. A test asserts no execution tool exists.
+
+Resource limits — timeout, address-space cap, CPU cap — still apply inside the sandbox, and stop a
+program wasting the machine rather than misusing it.

@@ -20,7 +20,7 @@ const renderAt = (path: string) =>
     </MemoryRouter>,
   )
 
-const UP = { ok: true, qiskit: '2.5.2', python: '3.14.7', timeoutSeconds: 15 }
+const UP = { ok: true, qiskit: '2.5.2', python: '3.14.7', timeoutSeconds: 15, sandboxed: true }
 
 /** Route /pyserver/health and /pyserver/run to canned replies. */
 function mockService(replies: { health?: unknown; run?: unknown; down?: boolean }) {
@@ -64,6 +64,26 @@ describe('the Python hub', () => {
     mockService({ health: UP })
     renderAt('/python')
     expect(screen.getAllByRole('link', { name: /playground/i }).length).toBeGreaterThan(0)
+  })
+
+  it('says when the sandbox is on', async () => {
+    mockService({ health: UP })
+    renderAt('/python')
+    expect(await screen.findByText(/sandboxed/i)).toBeDefined()
+  })
+
+  it('warns loudly when code would run unprotected', async () => {
+    mockService({
+      health: { ...UP, sandboxed: false, sandboxDetail: 'bubblewrap is not installed' },
+    })
+    renderAt('/python')
+
+    // Someone about to share this page needs to know before they do, not after.
+    // The heading is a <strong> inside the warning, so assert against the whole box.
+    const warning = (await screen.findByText(/Not sandboxed/i)).parentElement!
+    expect(warning.textContent).toMatch(/read and write/i)
+    expect(warning.textContent).toMatch(/bubblewrap is not installed/i)
+    expect(warning.textContent).toMatch(/before sharing/i)
   })
 
   it('reports the service version, and how to start it when it is down', async () => {

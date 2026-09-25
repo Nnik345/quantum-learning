@@ -20,6 +20,10 @@ export interface PythonHealth {
   qiskit?: string
   python?: string
   timeoutSeconds?: number
+  /** Whether submitted code runs inside bubblewrap. False means it runs with the host's permissions. */
+  sandboxed?: boolean
+  /** Why the sandbox is off, when it is. */
+  sandboxDetail?: string
   error?: string
 }
 

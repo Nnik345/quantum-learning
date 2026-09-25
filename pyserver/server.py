@@ -6,33 +6,54 @@ and `qiskit-terra` has never published a pure-Python one. So Python runs here in
 shape the project already uses for Ollama: a process on this machine, behind a Vite proxy, with
 nothing leaving the box.
 
-SECURITY: this runs code that arrives over HTTP. Each submission executes in a fresh subprocess with
-a wall-clock timeout and memory and CPU caps, which is enough to stop a runaway loop or an accidental
-allocation — it is NOT a sandbox. There is no filesystem or network isolation, which would need
-namespaces or a container. It binds to 127.0.0.1 for that reason. Do not expose this port.
+Two defences, which protect against different things:
+
+  SANDBOX      Every submission runs inside bubblewrap: read-only system, private scratch directory,
+               no network, no view of your home. This is what makes it safe to let other people
+               submit code. Required by default; PY_SANDBOX=off disables it deliberately and loudly.
+
+  ORIGIN CHECK Only pages served by the dev server may POST. This stops a malicious website you
+               happen to visit from quietly driving this service through your browser. It does NOT
+               stop someone you have given tunnel access from sending whatever they like — only the
+               sandbox protects you there.
 """
 
 from __future__ import annotations
 
 import os
 import resource
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from sandbox import availability, wrap
 
 RUNNER = Path(__file__).parent / "runner.py"
 
-# Generous enough for numpy and scipy, which reserve a lot of address space on import, and still low
-# enough that a runaway allocation fails fast rather than taking the machine down with it.
 MEMORY_LIMIT_BYTES = int(os.environ.get("PY_MEMORY_LIMIT_MB", "4096")) * 1024 * 1024
 WALL_TIMEOUT_S = float(os.environ.get("PY_TIMEOUT_S", "15"))
 CPU_TIMEOUT_S = int(WALL_TIMEOUT_S) + 5
 MAX_CODE_BYTES = 100_000
+
+SANDBOX_REQUESTED = os.environ.get("PY_SANDBOX", "on").lower() != "off"
+SANDBOX_OK, SANDBOX_DETAIL = availability() if SANDBOX_REQUESTED else (False, "disabled by PY_SANDBOX=off")
+SANDBOXED = SANDBOX_REQUESTED and SANDBOX_OK
+
+# Origins allowed to POST. The dev server and the preview server, on either spelling of localhost.
+# Sharing over a LAN address instead of an SSH tunnel means adding it here.
+DEFAULT_ORIGINS = ",".join(
+    f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 4173)
+)
+ALLOWED_ORIGINS = {
+    o.strip() for o in os.environ.get("PY_ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()
+}
 
 app = FastAPI(title="Quantum Learning Python service")
 
@@ -41,12 +62,34 @@ class RunRequest(BaseModel):
     code: str = Field(default="", max_length=MAX_CODE_BYTES)
 
 
+@app.middleware("http")
+async def only_from_the_site(request: Request, call_next):
+    """
+    Reject browser requests that did not come from the site.
+
+    A browser always sends `Origin` on a POST and cannot forge it, so an allowlist is enough to stop
+    a page you are visiting from driving this service. A request with no Origin is not from a
+    browser; it came from a process on this machine, which can already do anything, so it passes.
+    """
+    origin = request.headers.get("origin")
+    if request.method == "POST" and origin is not None and origin not in ALLOWED_ORIGINS:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": (
+                    f"Refused: {origin} is not an allowed origin. Requests must come from the dev "
+                    "server. Set PY_ALLOWED_ORIGINS if you are serving the site from another address."
+                )
+            },
+        )
+    return await call_next(request)
+
+
 def _apply_limits() -> None:
     """
-    Run in the child between fork and exec.
+    Run in the child between fork and exec. Inherited through bwrap into the submission.
 
-    A new session means a timeout can kill the whole process group, so a script that spawns
-    something does not leave it running after the request is gone.
+    These cap what a program may CONSUME. What it may reach is the sandbox's job.
     """
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
     resource.setrlimit(resource.RLIMIT_CPU, (CPU_TIMEOUT_S, CPU_TIMEOUT_S))
@@ -56,7 +99,7 @@ def _apply_limits() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    """Whether the service can actually run Qiskit, and which version the learner is writing against."""
+    """Whether the service can run Qiskit, and under what protection."""
     try:
         import qiskit
 
@@ -69,6 +112,8 @@ def health() -> dict:
         "qiskit": version,
         "python": sys.version.split()[0],
         "timeoutSeconds": WALL_TIMEOUT_S,
+        "sandboxed": SANDBOXED,
+        "sandboxDetail": SANDBOX_DETAIL,
     }
 
 
@@ -77,16 +122,35 @@ def run(request: RunRequest) -> dict:
     if not request.code.strip():
         return {"stdout": "", "stderr": "", "error": "There is no code to run.", "durationMs": 0}
 
+    if SANDBOX_REQUESTED and not SANDBOX_OK:
+        # Refusing beats running unprotected: the whole point of the default is that someone
+        # sharing this page does not silently lose the protection they think they have.
+        return {
+            "stdout": "",
+            "stderr": "",
+            "error": (
+                f"Refusing to run: the sandbox is unavailable — {SANDBOX_DETAIL}. "
+                "Install bubblewrap, or set PY_SANDBOX=off if you accept running code unprotected."
+            ),
+            "durationMs": 0,
+        }
+
     started = time.monotonic()
 
     with tempfile.TemporaryDirectory(prefix="qlrun-") as workdir:
-        code_path = Path(workdir) / "submission.py"
-        result_path = Path(workdir) / "result.json"
-        code_path.write_text(request.code, encoding="utf-8")
+        # Everything the run needs lives in the one directory the sandbox can write, so the
+        # sandboxed and unsandboxed paths are otherwise identical.
+        shutil.copy2(RUNNER, Path(workdir) / "runner.py")
+        (Path(workdir) / "submission.py").write_text(request.code, encoding="utf-8")
+
+        root = "/work" if SANDBOXED else workdir
+        command = [sys.executable, f"{root}/runner.py", f"{root}/submission.py", f"{root}/result.json"]
+        if SANDBOXED:
+            command = wrap(command, workdir)
 
         try:
             completed = subprocess.run(
-                [sys.executable, str(RUNNER), str(code_path), str(result_path)],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=WALL_TIMEOUT_S,
@@ -109,7 +173,7 @@ def run(request: RunRequest) -> dict:
                 "durationMs": round((time.monotonic() - started) * 1000),
             }
 
-        payload = _read_result(result_path)
+        payload = _read_result(Path(workdir) / "result.json")
 
     error = payload.get("error")
     if error is None and completed.returncode != 0:
@@ -149,5 +213,13 @@ def _read_result(path: Path) -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    # 127.0.0.1 is deliberate; see the module docstring.
+    banner = (
+        "sandboxed with bubblewrap"
+        if SANDBOXED
+        else f"NOT SANDBOXED - {SANDBOX_DETAIL}. Submitted code runs as you, with your permissions."
+    )
+    print(f"[quantum-learning] {banner}")
+    print(f"[quantum-learning] accepting POSTs from: {', '.join(sorted(ALLOWED_ORIGINS))}")
+
+    # 127.0.0.1 is deliberate. Share the SITE over an SSH tunnel, never this port.
     uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("PY_PORT", "8000")))

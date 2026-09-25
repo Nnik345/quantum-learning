@@ -14,10 +14,25 @@ export function ServiceStatus({ service }: { service?: PythonHealth }) {
 
   if (service.ok) {
     return (
-      <p className="text-xs text-ink-faint">
-        <span className="text-emerald">●</span> Qiskit {service.qiskit} on Python {service.python}
-        {service.timeoutSeconds ? ` · ${service.timeoutSeconds}s limit per run` : ''}
-      </p>
+      <div className="space-y-1.5">
+        <p className="text-xs text-ink-faint">
+          <span className="text-emerald">●</span> Qiskit {service.qiskit} on Python {service.python}
+          {service.timeoutSeconds ? ` · ${service.timeoutSeconds}s limit per run` : ''}
+          {service.sandboxed && ' · sandboxed'}
+        </p>
+        {service.sandboxed === false && (
+          /*
+           * Worth interrupting for. Unsandboxed means anything typed here runs with the host user's
+           * permissions — fine alone on your own machine, not fine on a page shared with others.
+           */
+          <div className="max-w-2xl rounded-lg border border-rose/40 bg-rose/5 px-3 py-2 text-xs leading-5 text-rose">
+            <strong className="font-semibold">Not sandboxed.</strong> Code run here can read and write
+            the host&rsquo;s files and reach the network.
+            {service.sandboxDetail ? ` ${service.sandboxDetail}.` : ''} Install bubblewrap and restart
+            the service before sharing this page with anyone.
+          </div>
+        )}
+      </div>
     )
   }
 

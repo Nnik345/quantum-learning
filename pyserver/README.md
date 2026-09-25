@@ -37,18 +37,62 @@ origin — no CORS, and it tunnels over SSH exactly like Ollama does.
 | `PY_TIMEOUT_S` | `15` | Wall-clock limit per run |
 | `PY_MEMORY_LIMIT_MB` | `4096` | Address-space cap per run |
 | `PY_URL` (read by Vite) | `http://localhost:8000` | Where the site looks for this service |
+| `PY_SANDBOX` | `on` | `off` runs code unprotected, deliberately |
+| `PY_ALLOWED_ORIGINS` | localhost/127.0.0.1 on 5173 and 4173 | Comma-separated origins allowed to POST |
 
 Because the proxy runs inside the Vite process, `localhost` means *the machine Vite is on*. The
 service needs no GPU, so running it next to Vite is the simplest choice even when Ollama is elsewhere.
 
 ## Security
 
-**Do not expose this port.** This executes code that arrives over HTTP.
+Submitted code runs inside **bubblewrap**: a read-only system, a private scratch directory, no
+network, and no view of your home. Writes to anything outside the scratch land in an ephemeral root
+and vanish when the run ends. Verified, not assumed:
 
-Each submission runs in a fresh subprocess with a wall-clock timeout, an address-space cap, a CPU cap
-and its own session, so a runaway loop or an accidental allocation is stopped. That is the limit of
-what it does. There is **no filesystem or network isolation** — that needs namespaces or a container.
-It binds to `127.0.0.1` for exactly this reason, and it is intended for local development only.
+```
+/home/<you>/.bashrc      False
+/home/<you>/.ssh/id_rsa  False
+/etc/passwd              False
+network                  blocked
+```
+
+The sandbox is **required by default**. If bubblewrap is missing or namespaces are unavailable, the
+service refuses to run anything and says why, rather than quietly falling back to running code with
+your permissions. `PY_SANDBOX=off` opts out deliberately; the startup banner and `/health` both
+report it, and the page shows a red warning.
+
+Resource limits still apply inside the sandbox: a wall-clock timeout, an address-space cap, a CPU cap
+and its own session.
+
+### Who may submit
+
+`/run` accepts POSTs only from allowed origins — by default the dev server and preview server on
+`localhost` and `127.0.0.1`. A browser cannot forge `Origin`, so this stops a malicious page you
+happen to be visiting from driving the service. Requests with no `Origin` are not from a browser and
+are allowed; they come from a process on this machine, which can already do anything.
+
+**The origin check is not access control.** Anyone you give tunnel access to can send whatever they
+like. The sandbox is what protects you from them.
+
+The service still binds to `127.0.0.1`. Share the **site**, never this port.
+
+## Sharing the site for testing
+
+Give a tester an SSH tunnel to the dev server only:
+
+```sh
+# on the tester's machine
+ssh -L 5173:localhost:5173 you@your-box
+```
+
+They open `http://localhost:5173` and everything works — their browser sends
+`Origin: http://localhost:5173`, which is already allowed, and their code runs sandboxed.
+
+Serving on a LAN address instead (`npm run dev -- --host`) means telling the service about it:
+
+```sh
+PY_ALLOWED_ORIGINS=http://192.168.1.50:5173 python pyserver/server.py
+```
 
 ## Contract
 
