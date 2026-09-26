@@ -24,6 +24,8 @@ export interface PythonHealth {
   sandboxed?: boolean
   /** Why the sandbox is off, when it is. */
   sandboxDetail?: string
+  /** Every installed distribution as "name==version", so the tutor writes against what exists. */
+  packages?: string[]
   error?: string
 }
 

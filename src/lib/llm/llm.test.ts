@@ -118,6 +118,42 @@ describe('system prompt', () => {
     expect(MAX_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(DEFAULT_NUM_CTX * 0.3)
   })
 
+  it('tells the model what the Python service actually has installed', () => {
+    const packages = ['qiskit==2.5.2', 'qiskit-aer==0.17.2', 'numpy==2.5.3', 'scipy==1.18.1']
+    const prompt = buildSystemPrompt({ path: '/python/playground', onPythonPage: true, pythonPackages: packages })
+
+    // Names, not versions: the one version that changes how code is written is Qiskit's, and the
+    // line above already states it. Repeating four more would spend budget for nothing.
+    expect(prompt).toMatch(/Installed: .*qiskit, qiskit-aer, numpy, scipy/)
+    expect(prompt).not.toMatch(/2\.5\.3/)
+    expect(prompt).toMatch(/Nothing else can be imported/)
+  })
+
+  it('says nothing about packages when the service has not answered', () => {
+    // An empty inventory means "not known yet", never "an empty environment" — claiming the latter
+    // would make the model refuse to write any code at all.
+    for (const packages of [undefined, []]) {
+      const prompt = buildSystemPrompt({ path: '/python/playground', onPythonPage: true, pythonPackages: packages })
+      expect(prompt).not.toMatch(/Installed:/)
+      expect(prompt).not.toMatch(/Nothing else can be imported/)
+    }
+  })
+
+  it('stays within budget with a realistic inventory attached', () => {
+    const packages = [
+      'dill==0.4.1', 'numpy==2.5.3', 'psutil==7.2.2', 'python-dateutil==2.9.0',
+      'qiskit==2.5.2', 'qiskit-aer==0.17.2', 'rustworkx==0.18.1', 'scipy==1.18.1',
+      'six==1.17.0', 'stevedore==5.9.1',
+    ]
+    const prompt = buildSystemPrompt({ path: '/python/grover', onPythonPage: true, pythonPackages: packages })
+    expect(estimateTokens(prompt)).toBeLessThanOrEqual(MAX_SYSTEM_PROMPT_TOKENS)
+  })
+
+  it('carries the inventory only onto Python pages', () => {
+    const packages = ['qiskit==2.5.2']
+    expect(buildSystemPrompt({ path: '/theory/measurement', pythonPackages: packages })).not.toMatch(/Installed:/)
+  })
+
   it('only spends the extra budget where Python guidance applies', () => {
     // The point of making it conditional: a reader on a theory page pays nothing for it.
     const theory = estimateTokens(buildSystemPrompt({ path: '/theory/measurement' }))

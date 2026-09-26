@@ -29,6 +29,30 @@ export interface PromptContext {
   hasCircuit?: boolean
   /** Whether the reader is on a Python page, where a different set of tools applies. */
   onPythonPage?: boolean
+  /**
+   * What the Python service actually has installed, as reported by its /health.
+   *
+   * Given to the model so it writes against this environment rather than against whatever its
+   * training data assumed. Omitted when the service has not answered yet.
+   */
+  pythonPackages?: string[]
+}
+
+/**
+ * The service's inventory, rendered for the prompt.
+ *
+ * Names only. Versions would double the length for no gain — the one version that changes how code
+ * is written is Qiskit's, and the line above already states it. An empty or missing list renders
+ * nothing rather than claiming an empty environment.
+ */
+function packageLines(packages?: string[]): string[] {
+  if (!packages?.length) return []
+  const names = packages.map((entry) => entry.split('==')[0]).join(', ')
+  return [
+    '',
+    `Installed: ${names}.`,
+    'Nothing else can be imported — say so instead of writing code that needs it.',
+  ]
 }
 
 export function buildSystemPrompt(context: PromptContext = {}): string {
@@ -156,8 +180,11 @@ export function buildSystemPrompt(context: PromptContext = {}): string {
       '',
       '## They are writing Python',
       '',
-      'This site runs REAL Qiskit 2.x through a local service — no execute(), no Aer; use',
-      'qiskit.quantum_info.Statevector. Pages: /python, /python/<lesson>, /python/playground.',
+      'REAL Qiskit 2.x runs through a local service. Pages: /python, /python/<lesson>, /python/playground.',
+      'Aer is NOT in the qiskit package any more: write `from qiskit_aer import AerSimulator`,',
+      'never `from qiskit import Aer`. There is no qiskit.execute — transpile, then backend.run().',
+      'For a plain simulation the simplest path stays qiskit.quantum_info.Statevector.',
+      ...packageLines(context.pythonPackages),
       '',
       '- Call get_python_code FIRST when they mention their code, an error, or why something fails.',
       '  It returns their code, its output, any traceback, and the task.',

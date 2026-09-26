@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
 import { getTopic } from '../content/registry'
+import { health as pythonHealth } from '../lib/python/client'
 import { DEFAULT_MODEL } from '../lib/llm/client'
 import { useAssistant } from './useAssistant'
 import { MessageView } from './MessageView'
@@ -29,6 +30,8 @@ const SUGGESTIONS = [
 export function AssistantPanel() {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
+  /** What the Python service has installed, so the tutor writes against this environment. */
+  const [pythonPackages, setPythonPackages] = useState<string[]>()
   const location = useLocation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -43,8 +46,20 @@ export function AssistantPanel() {
       topicTitle: topic?.title,
       currentSlug: topic?.slug,
       onPythonPage: location.pathname.startsWith('/python'),
+      pythonPackages,
     }
-  }, [location.pathname])
+  }, [location.pathname, pythonPackages])
+
+  // Asked for once, when the reader first reaches a Python page. The inventory does not change
+  // while the service is up, and the tutor is no use on other pages knowing it.
+  useEffect(() => {
+    if (!context.onPythonPage || pythonPackages) return
+    const controller = new AbortController()
+    pythonHealth(controller.signal).then((state) => {
+      if (state.ok && state.packages?.length) setPythonPackages(state.packages)
+    })
+    return () => controller.abort()
+  }, [context.onPythonPage, pythonPackages])
 
   const { messages, status, health, send, stop, clear, checkHealth } = useAssistant(context)
   const panel = usePanelSize()

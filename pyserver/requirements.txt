@@ -1,5 +1,9 @@
 # Pinned to what was verified against Python 3.14.7: every one of these has a prebuilt
 # linux wheel for cp314, so nothing compiles from source.
 qiskit==2.5.2
+# Not used by the site's own lessons, which simulate with qiskit.quantum_info. It is here so that
+# "run it on a backend" and "add a noise model" have a real answer instead of a deflection — both
+# are reasonable things for a learner to ask, and Aer is how Qiskit does them.
+qiskit-aer==0.17.2
 fastapi==0.141.1
 uvicorn==0.54.0

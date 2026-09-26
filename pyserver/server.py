@@ -21,6 +21,7 @@ Two defences, which protect against different things:
 from __future__ import annotations
 
 import os
+import re
 import resource
 import shutil
 import subprocess
@@ -97,6 +98,74 @@ def _apply_limits() -> None:
     os.setsid()
 
 
+# This service's own machinery. Its dependency closure is excluded from the inventory below:
+# nobody writing quantum code imports starlette or h11, and listing them crowds out the packages
+# that matter in a prompt with a fixed budget.
+SERVICE_PACKAGES = ("fastapi", "uvicorn", "pip")
+
+
+def _closure(roots: tuple[str, ...]) -> set[str]:
+    """
+    Every distribution reachable from `roots` through their requirements, lower-cased.
+
+    The requirement name is taken with a regex rather than `packaging.requirements`, which is not
+    installed here — depending on it silently reduced this to the three root names.
+
+    Extras are skipped: a requirement guarded by `; extra == "..."` is not installed unless that
+    extra was asked for, and treating it as present would hide a package that really is available.
+    """
+    from importlib.metadata import distribution
+
+    seen: set[str] = set()
+    queue = list(roots)
+    while queue:
+        name = queue.pop().lower().replace("_", "-")
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            for raw in distribution(name).requires or []:
+                if "extra ==" in raw:
+                    continue
+                match = re.match(r"[A-Za-z0-9._-]+", raw.strip())
+                if match:
+                    queue.append(match.group(0))
+        except Exception:  # noqa: BLE001 - a missing edge just means a shorter closure
+            continue
+    return seen
+
+
+def installed_packages() -> list[str]:
+    """
+    What the learner's code can import, as "name==version".
+
+    Handed to the tutor so it writes against this environment rather than whatever its training data
+    assumed — its priors are full of packages that are not here, and of imports that moved between
+    packages in Qiskit 1.0.
+
+    Excludes this service's own web stack. Those are importable in principle, but listing a dozen
+    names nobody would ever use pushes the ones that matter out of a limited prompt.
+    """
+    try:
+        from importlib.metadata import distributions
+
+        try:
+            excluded = _closure(SERVICE_PACKAGES)
+        except Exception:  # noqa: BLE001 - without packaging, report everything rather than nothing
+            excluded = {name.lower() for name in SERVICE_PACKAGES}
+
+        found = {
+            dist.metadata["Name"]: dist.version
+            for dist in distributions()
+            if dist.metadata
+            and dist.metadata["Name"]
+            and dist.metadata["Name"].lower().replace("_", "-") not in excluded
+        }
+        return [f"{n}=={v}" for n, v in sorted(found.items(), key=lambda kv: kv[0].lower())]
+    except Exception:  # noqa: BLE001 - an inventory is a nicety, never a reason to fail health
+        return []
+
+
 @app.get("/health")
 def health() -> dict:
     """Whether the service can run Qiskit, and under what protection."""
@@ -114,6 +183,7 @@ def health() -> dict:
         "timeoutSeconds": WALL_TIMEOUT_S,
         "sandboxed": SANDBOXED,
         "sandboxDetail": SANDBOX_DETAIL,
+        "packages": installed_packages(),
     }
 
 
