@@ -67,32 +67,34 @@ and its own session.
 ### Who may submit
 
 `/run` accepts POSTs only from allowed origins — by default the dev server and preview server on
-`localhost` and `127.0.0.1`. A browser cannot forge `Origin`, so this stops a malicious page you
-happen to be visiting from driving the service. Requests with no `Origin` are not from a browser and
-are allowed; they come from a process on this machine, which can already do anything.
+`localhost` and `127.0.0.1`. A browser cannot forge `Origin`, so this refuses a page that tries to
+reach this service directly on port 8000.
 
-**The origin check is not access control.** Anyone you give tunnel access to can send whatever they
-like. The sandbox is what protects you from them.
+Requests with no `Origin` are not from a browser and are allowed; they come from a process on this
+machine, which can already do anything.
 
-The service still binds to `127.0.0.1`. Share the **site**, never this port.
+**This is not access control.** The dev server rewrites `Origin` to the loopback origin on everything
+it proxies (`src/lib/devProxy.ts`), so anything that can reach the dev server can reach this service
+through it. That is deliberate — otherwise serving the site on any non-loopback address breaks every
+feature here — but it means the allowlist only guards direct access to port 8000. **The sandbox is
+what protects you from whoever can reach the dev server.**
 
-## Sharing the site for testing
+`PY_ALLOWED_ORIGINS` exists for setups that bypass the dev server; the ordinary path needs no
+configuration.
 
-Give a tester an SSH tunnel to the dev server only:
+The service binds to `127.0.0.1`. Expose the dev server, never this port.
+
+## Serving the site to another machine
+
+An SSH tunnel to the dev server is enough:
 
 ```sh
-# on the tester's machine
+# on the other machine
 ssh -L 5173:localhost:5173 you@your-box
 ```
 
-They open `http://localhost:5173` and everything works — their browser sends
-`Origin: http://localhost:5173`, which is already allowed, and their code runs sandboxed.
-
-Serving on a LAN address instead (`npm run dev -- --host`) means telling the service about it:
-
-```sh
-PY_ALLOWED_ORIGINS=http://192.168.1.50:5173 python pyserver/server.py
-```
+Everything works there with no configuration — the proxy normalises the origin, and submitted code
+runs sandboxed.
 
 ## Contract
 

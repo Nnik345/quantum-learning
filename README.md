@@ -19,7 +19,7 @@ Everything runs on your own machine. Nothing is sent anywhere.
 | [What you can do](#what-you-can-do) | The four things this site is |
 | [Setup](#setup) | **Start here.** Three tiers, each usable on its own |
 | [Running it](#running-it) | Day-to-day commands and ports |
-| [Sharing it for testing](#sharing-it-for-testing) | Letting someone else try it over SSH |
+| [Serving it to another machine](#serving-it-to-another-machine) | SSH tunnel or a bound network address |
 | [The learning path](#the-learning-path) | 22 steps across 6 stages |
 | [Exercises](#exercises) | How auto-grading works, and why it grades behaviour |
 | [The Circuit Lab](#the-circuit-lab) | The simulator and the board |
@@ -28,7 +28,7 @@ Everything runs on your own machine. Nothing is sent anywhere.
 | [Conventions](#conventions) | Qubit ordering and measurement — read before comparing to Qiskit |
 | [Repository layout](#repository-layout) | Where everything lives |
 | [Writing content](#writing-content) | Adding or editing lessons |
-| [Tests and evaluation](#tests-and-evaluation) | 533 tests, plus a live-model eval |
+| [Tests and evaluation](#tests-and-evaluation) | 545 tests, plus a live-model eval |
 | [What was measured](#what-was-measured) | Findings that changed decisions |
 | [Future work](#future-work) | What is worth doing next |
 | [Security](#security) | The honest limits |
@@ -169,7 +169,7 @@ and `PY_URL` retarget them.
 | Script | Does |
 | --- | --- |
 | `npm run dev` | Dev server |
-| `npm test` | 533 tests. Never needs Ollama or Python |
+| `npm test` | 545 tests. Never needs Ollama or Python |
 | `npm run test:watch` | Same, watching |
 | `npm run typecheck` | `tsc -b --noEmit` |
 | `npm run build` | Typecheck then production build |
@@ -177,31 +177,34 @@ and `PY_URL` retarget them.
 
 ---
 
-## Sharing it for testing
+## Serving it to another machine
 
-Give a tester an SSH tunnel to the dev server. Nothing else needs to change:
+An SSH tunnel to the dev server is enough; nothing else needs configuring:
 
 ```sh
-# on the tester's machine
+# on the other machine
 ssh -L 5173:localhost:5173 you@your-box
 ```
 
-They open `http://localhost:5173` and get the whole site, including Python. Their code runs in the
-sandbox, and their browser sends an origin the service already allows.
+Open `http://localhost:5173` there and the whole site works, Python included.
+
+To serve it on the network instead, bind to **one specific address** rather than every interface:
+
+```sh
+npm run dev -- --host 192.168.1.50
+```
+
+`--host` on its own listens on `0.0.0.0`, which means every network the machine is attached to.
+
+Either way the two services need no configuration, because the dev server normalises the `Origin`
+header on everything it proxies — see [Security](#security) for what that does and does not protect.
 
 Two rules:
 
-- **Tunnel 5173 only.** Never expose 8000 or 11434. The site reaches both through the Vite proxy.
-- **Check the sandbox is on first.** The Python page says `· sandboxed` when it is, and shows a red
-  warning when it is not. Do not share a page showing that warning — submitted code would run with
-  your permissions.
-
-Serving on a LAN address instead (`npm run dev -- --host`) means telling the service about it, since
-the origin changes:
-
-```sh
-PY_ALLOWED_ORIGINS=http://192.168.1.50:5173 python pyserver/server.py
-```
+- **Expose 5173 only.** Never 8000 or 11434. The site reaches both through the Vite proxy.
+- **Check the sandbox is on first.** The Python page reads `· sandboxed` when it is, and shows a red
+  warning when it is not. Never serve a page showing that warning to anyone — submitted code would
+  run with the host user's permissions.
 
 ## The learning path
 
@@ -391,6 +394,7 @@ src/
     persist.ts         Save/load, custom gates re-validated on load
   lib/llm/           The tutor: client, tools, retrieval, prompt, validator
   lib/python/        Python client, the Qiskit bit-order flip, the tutor bridge
+  lib/devProxy.ts    How the dev server proxies Ollama and the Python service
   circuit/           The Circuit Lab UI
   content/           Lessons, exercises, Python lessons, syllabus, grading
   components/        Tex, Bloch sphere, CodeMirror editor, layout
@@ -438,7 +442,7 @@ fail if it needs a gate the site has not taught by that step.
 ## Tests and evaluation
 
 ```sh
-npm test          # 533 tests across 19 files. No Ollama, no Python service
+npm test          # 545 tests across 20 files. No Ollama, no Python service
 npm run eval      # 14 cases against a live model
 npm run eval bell # just matching ids
 ```
@@ -559,11 +563,27 @@ says why, instead of silently falling back. `PY_SANDBOX=off` opts out deliberate
 banner, `/health` and the page all report it.
 
 **Only the site may submit.** `/run` rejects POSTs whose `Origin` is not allowlisted, which stops a
-malicious page you happen to be visiting from driving the service through your browser. It is not
-access control — anyone with tunnel access can send what they like, and the sandbox is what protects
-you there.
+malicious page you happen to be visiting from reaching the service directly on `localhost:8000`.
 
-Both services bind to `127.0.0.1`. Share the site over a tunnel; never expose 8000 or 11434.
+There is a deliberate trade-off behind that. Both local services guard themselves with an origin
+allowlist that only knows about loopback, so serving the site on any other address used to make every
+feature behind a service fail with a 403 while the page itself loaded fine. The dev server therefore
+**rewrites `Origin` to the loopback origin on everything it proxies** (`src/lib/devProxy.ts`), which
+is what lets the site be served anywhere without configuring either service.
+
+The consequence, stated plainly:
+
+```
+POST localhost:8000/run          with a hostile Origin  ->  refused
+POST <dev-server>:5173/pyserver  with a hostile Origin  ->  runs
+```
+
+A page that knows the dev server's address can therefore get code to execute, though it cannot read
+the response. **The sandbox is what makes that acceptable** — such code reaches no files and no
+network, and the worst it costs is the run timeout. The dev server's binding is the real boundary, so
+bind it to one address rather than `0.0.0.0`.
+
+Both services bind to `127.0.0.1`. Expose the dev server only; never 8000 or 11434.
 
 **The tutor cannot execute anything.** It reads your code and suggests fixes; running them is your
 click. A test asserts no execution tool exists.
