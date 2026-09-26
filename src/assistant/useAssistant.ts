@@ -62,13 +62,25 @@ export function wantsDeepThinking(_text: string): boolean {
 let nextId = 0
 const newId = () => `m${nextId++}`
 
-export function useAssistant(context: PromptContext & { currentSlug?: string }) {
+export function useAssistant(
+  context: PromptContext & { currentSlug?: string },
+  /** Model to talk to. Omitted in tests and by callers happy with the configured default. */
+  model?: string,
+) {
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [status, setStatus] = useState<AssistantStatus>('idle')
   const [health, setHealth] = useState<HealthResult | undefined>()
 
+  /*
+   * Rebuilt whenever the reader picks a different model. The client holds its model for the life of
+   * the instance, so reusing one across a switch would keep talking to the old one.
+   */
   const clientRef = useRef<OllamaClient>()
-  if (!clientRef.current) clientRef.current = new OllamaClient()
+  const modelRef = useRef<string>()
+  if (!clientRef.current || modelRef.current !== model) {
+    clientRef.current = new OllamaClient(model ? { model } : {})
+    modelRef.current = model
+  }
   const abortRef = useRef<AbortController>()
 
   const checkHealth = useCallback(async () => {

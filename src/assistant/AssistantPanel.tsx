@@ -7,6 +7,7 @@ import { DEFAULT_MODEL } from '../lib/llm/client'
 import { useAssistant } from './useAssistant'
 import { MessageView } from './MessageView'
 import { usePanelSize, type ResizeEdge } from './usePanelSize'
+import { useModelChoice, formatSize } from './useModelChoice'
 
 const STATUS_LABEL: Record<string, string> = {
   thinking: 'Thinking…',
@@ -61,7 +62,25 @@ export function AssistantPanel() {
     return () => controller.abort()
   }, [context.onPythonPage, pythonPackages])
 
-  const { messages, status, health, send, stop, clear, checkHealth } = useAssistant(context)
+  const models = useModelChoice()
+  const { messages, status, health, send, stop, clear, checkHealth } = useAssistant(
+    context,
+    models.model,
+  )
+
+  /*
+   * Retire the "loading" note once a reply has actually come back on the newly-chosen model, which
+   * is the moment it is resident. Waiting for `idle` alone is not enough: status is already idle when
+   * the reader picks a model, so the note would clear before the request it is warning about.
+   */
+  const requested = useRef(false)
+  useEffect(() => {
+    if (status !== 'idle') requested.current = true
+    else if (requested.current) {
+      requested.current = false
+      models.settled()
+    }
+  }, [models, status])
   const panel = usePanelSize()
   const busy = status !== 'idle'
 
@@ -125,6 +144,22 @@ export function AssistantPanel() {
           {context.topicTitle ?? context.path}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          {models.available.length > 1 && (
+            <select
+              value={models.model}
+              onChange={(e) => models.choose(e.target.value)}
+              aria-label="Model"
+              title="Larger models answer better and run slower. Switching reloads the model."
+              className="max-w-[9.5rem] truncate rounded border border-line bg-ground px-1.5 py-0.5 text-[11px] text-ink-dim outline-none transition-colors hover:text-ink focus:border-cyan"
+            >
+              {models.available.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}
+                  {m.sizeBytes ? ` \u00b7 ${formatSize(m.sizeBytes)}` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           {messages.length > 0 && (
             <button
               onClick={clear}
@@ -192,6 +227,9 @@ export function AssistantPanel() {
           <div className="flex items-center gap-2 text-[11px] text-ink-faint">
             <span className="inline-block size-1.5 animate-pulse rounded-full bg-cyan" />
             {STATUS_LABEL[status] ?? 'Working…'}
+            {/* A switch evicts the resident model and cold-loads the new one; on a card that cannot
+                hold both that is tens of seconds, and silence looks like a hang. */}
+            {models.switching && <span>· loading {models.model}, first reply will be slow</span>}
           </div>
         )}
       </div>

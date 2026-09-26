@@ -58,6 +58,17 @@ export interface ClientOptions {
   model?: string
 }
 
+/** One model the daemon has pulled, as offered in the picker. */
+export interface AvailableModel {
+  name: string
+  /** On-disk size in bytes. Shown because it is what decides whether a model fits the card. */
+  sizeBytes: number
+  /** e.g. "9.7B", when the daemon reports it. */
+  parameters?: string
+  /** e.g. "Q4_K_M". */
+  quantisation?: string
+}
+
 export interface HealthResult {
   ok: boolean
   models?: string[]
@@ -77,6 +88,39 @@ export class OllamaClient {
   }
 
   /** Is the daemon up, and is our model pulled? Used to fail helpfully rather than hang. */
+  /**
+   * Every model this daemon has pulled.
+   *
+   * The picker is built from this rather than from a list in the source, so it can only ever offer
+   * models that are actually present — no dead entries, and no "not pulled" error reachable by
+   * choosing something. It also means the same build adapts to an 8 GB machine and a 24 GB one
+   * without being told which it is on.
+   */
+  async listModels(timeoutMs = 3000): Promise<AvailableModel[]> {
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
+    try {
+      const res = await fetch(`${this.baseUrl}/api/tags`, { signal: abort.signal })
+      if (!res.ok) return []
+      const body = (await res.json()) as {
+        models?: { name?: string; size?: number; details?: Record<string, string> }[]
+      }
+      return (body.models ?? [])
+        .filter((m) => m.name)
+        .map((m) => ({
+          name: m.name!,
+          sizeBytes: m.size ?? 0,
+          parameters: m.details?.parameter_size,
+          quantisation: m.details?.quantization_level,
+        }))
+        .sort((a, b) => a.sizeBytes - b.sizeBytes)
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   async health(timeoutMs = 3000): Promise<HealthResult> {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), timeoutMs)

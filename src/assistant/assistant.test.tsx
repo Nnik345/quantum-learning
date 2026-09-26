@@ -17,6 +17,12 @@ import { DEFAULT_MODEL } from '../lib/llm/client'
 let script: ChatChunk[][] = []
 let lastRequest: ChatRequest | undefined
 let health: { ok: boolean; error?: string; modelMissing?: boolean } = { ok: true }
+/** What the daemon has pulled. The picker only appears with more than one. */
+let pulled: { name: string; sizeBytes: number }[] = []
+/** Every client the panel built, so a model choice can be checked where it actually lands. */
+let built: { model?: string }[] = []
+/** When set, a reply waits on it, so the UI can be inspected mid-request. */
+let inFlight: Promise<void> | undefined
 
 vi.mock('../lib/llm/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/llm/client')>()
@@ -25,11 +31,20 @@ vi.mock('../lib/llm/client', async (importOriginal) => {
     OllamaClient: class {
       baseUrl = '/ollama'
       model = 'test-model'
+      constructor(options: { model?: string } = {}) {
+        built.push(options)
+        if (options.model) this.model = options.model
+      }
       async health() {
         return health
       }
+      async listModels() {
+        // Empty by default, so the picker stays out of every test that is not about it.
+        return pulled
+      }
       async *chat(request: ChatRequest) {
         lastRequest = request
+        if (inFlight) await inFlight
         const turn = script.shift() ?? [{ content: 'no script left', done: true }]
         for (const chunk of turn) yield chunk
       }
@@ -66,6 +81,10 @@ beforeEach(() => {
   script = []
   lastRequest = undefined
   health = { ok: true }
+  pulled = []
+  built = []
+  inFlight = undefined
+  window.localStorage.removeItem('quantum-learning:model:v1')
   bridge.unpublishCircuit()
   bridge.takePendingCircuit()
 })
@@ -525,5 +544,75 @@ describe('resizing the panel', () => {
     renderPanel()
     open()
     expect(screen.queryByRole('separator', { name: /resize/i })).toBeNull()
+  })
+})
+
+describe('choosing a model', () => {
+  const THREE = [
+    { name: 'qwen3.5:2b', sizeBytes: 2_700_000_000 },
+    { name: 'qwen3.5:9b', sizeBytes: 6_600_000_000 },
+    { name: 'qwen3.5:9b-q8_0', sizeBytes: 10_700_000_000 },
+  ]
+
+  it('says nothing when there is only one model to say it about', async () => {
+    pulled = [{ name: 'qwen3.5:9b', sizeBytes: 6_600_000_000 }]
+    renderPanel()
+    open()
+    await waitFor(() => expect(built.length).toBeGreaterThan(0))
+    expect(screen.queryByLabelText('Model')).toBeNull()
+  })
+
+  it('offers every pulled model with the size that decides whether it fits', async () => {
+    pulled = THREE
+    renderPanel()
+    open()
+
+    const select = (await screen.findByLabelText('Model')) as HTMLSelectElement
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      'qwen3.5:2b · 2.7 GB',
+      'qwen3.5:9b · 6.6 GB',
+      'qwen3.5:9b-q8_0 · 10.7 GB',
+    ])
+  })
+
+  it('sends the choice to the client, and remembers it', async () => {
+    pulled = THREE
+    renderPanel()
+    open()
+    const select = await screen.findByLabelText('Model')
+
+    fireEvent.change(select, { target: { value: 'qwen3.5:2b' } })
+
+    // The point of the picker: the next request goes to the model that was picked.
+    expect(built.at(-1)?.model).toBe('qwen3.5:2b')
+    expect(window.localStorage.getItem('quantum-learning:model:v1')).toBe('qwen3.5:2b')
+  })
+
+  it('warns that a freshly chosen model has to load first', async () => {
+    // Switching evicts the resident model, so the first reply stalls for tens of seconds on a card
+    // that cannot hold both. Unexplained, that reads as a hang.
+    pulled = THREE
+    script = [text('A qubit is a two-level system.')]
+    let release!: () => void
+    inFlight = new Promise<void>((resolve) => (release = resolve))
+
+    renderPanel()
+    open()
+    fireEvent.change(await screen.findByLabelText('Model'), {
+      target: { value: 'qwen3.5:9b-q8_0' },
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/ask a question/i), {
+      target: { value: 'What is a qubit?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText(/loading qwen3.5:9b-q8_0, first reply will be slow/i)).toBeDefined()
+
+    await act(async () => {
+      release()
+    })
+    // Once a reply has arrived the model is resident, so the warning retires itself.
+    expect(screen.queryByText(/first reply will be slow/i)).toBeNull()
   })
 })
