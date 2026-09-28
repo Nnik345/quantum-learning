@@ -44,7 +44,23 @@ export interface TextSegment {
  * A rejected link keeps its label as ordinary text, so an answer never loses words just because a
  * citation was wrong.
  */
-export function splitLinks(input: string): TextSegment[] {
+/**
+ * Markdown image syntax, well-formed or not.
+ *
+ * The model reaches for an image to "show" a circuit that is already on screen as a card. It writes
+ * it properly — ![Deutsch Circuit](/algorithms/deutsch) — or starts one and runs straight into
+ * prose: ![Deutsch Circuit]( Deutsch's Algorithm decides… (both seen live). Either way the marker
+ * goes, with its address if it has a clean one, and any following prose stays.
+ */
+const IMAGE = /!\[[^\]]*\](\([^)\s]*\)|\(\s?)?/g
+
+export function splitLinks(raw: string): TextSegment[] {
+  /*
+   * Images are never rendered: fetching a model-supplied URL is the same risk as linking to one.
+   * Dropped before links are read, because treating one as a rejected link kept its caption and
+   * left a stray "!Deutsch's Circuit" line beneath the real circuit.
+   */
+  const input = raw.replace(IMAGE, '')
   const segments: TextSegment[] = []
   const pattern = /\[([^\]]+)\]\(([^)\s]+)\)/g
 

@@ -93,6 +93,28 @@ describe('splitLinks', () => {
     ).filter((s) => s.kind === 'link')
     expect(links.map((l) => l.href)).toEqual(['/theory/quantum-gates', '/circuit'])
   })
+
+  it('drops an image entirely, rather than leaving a stray "!" and its caption', () => {
+    // Seen live: the model "showed" the circuit as ![Deutsch Circuit](…) under the real card.
+    for (const src of ['deutsch.png', 'https://example.com/c.png', '/algorithms/deutsch']) {
+      const segments = splitLinks(`Here it is: ![Deutsch's Circuit](${src}) and more.`)
+      expect(segments.map((s) => s.text).join(''), src).toBe('Here it is:  and more.')
+      expect(segments.some((s) => s.kind === 'link'), src).toBe(false)
+    }
+  })
+
+  it('drops a half-written image and keeps the prose that ran into it', () => {
+    // Also seen live: the image was started and never finished.
+    const text = (s: string) => splitLinks(s).map((x) => x.text).join('')
+    expect(text("![Deutsch Circuit]( Deutsch's Algorithm decides")).toBe("Deutsch's Algorithm decides")
+    expect(text('![Deutsch Circuit]')).toBe('')
+  })
+
+  it('still treats a link after an exclamation as a link', () => {
+    // "!" only means an image when it touches the bracket.
+    const segments = splitLinks('Done! [Deutsch](/algorithms/deutsch)')
+    expect(segments.find((s) => s.kind === 'link')?.href).toBe('/algorithms/deutsch')
+  })
 })
 
 describe('rendered model prose', () => {

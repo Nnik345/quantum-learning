@@ -23,6 +23,9 @@ let pulled: { name: string; sizeBytes: number }[] = []
 let built: { model?: string }[] = []
 /** When set, a reply waits on it, so the UI can be inspected mid-request. */
 let inFlight: Promise<void> | undefined
+/** Which model call (1-based) waits on inFlight. Unset: every one does. */
+let holdAtCall: number | undefined
+let chatCalls = 0
 
 vi.mock('../lib/llm/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/llm/client')>()
@@ -44,7 +47,8 @@ vi.mock('../lib/llm/client', async (importOriginal) => {
       }
       async *chat(request: ChatRequest) {
         lastRequest = request
-        if (inFlight) await inFlight
+        chatCalls++
+        if (inFlight && (holdAtCall === undefined || chatCalls === holdAtCall)) await inFlight
         const turn = script.shift() ?? [{ content: 'no script left', done: true }]
         for (const chunk of turn) yield chunk
       }
@@ -84,6 +88,8 @@ beforeEach(() => {
   pulled = []
   built = []
   inFlight = undefined
+  holdAtCall = undefined
+  chatCalls = 0
   window.localStorage.removeItem('quantum-learning:model:v1')
   bridge.unpublishCircuit()
   bridge.takePendingCircuit()
@@ -619,10 +625,9 @@ describe('choosing a model', () => {
 
 describe('when the model corrects itself mid-turn', () => {
   /*
-   * The prompt tells the model to call propose_circuit again when the simulator reports its circuit
-   * does not do what it intended, so several accepted circuits in one turn is normal and the LAST
-   * one is the answer. Rendering them as equal cards made the reader guess, and let them load a
-   * circuit the model had already thrown away.
+   * The model is told to fix a circuit that does not do what it meant, so a turn can contain
+   * attempts it later replaced. Those are its working, not the answer: a learner shown them — even
+   * folded away — is left asking which one is right and what went wrong. Only final versions show.
    */
   const wrong = toolCall('propose_circuit', {
     numQubits: 2,
@@ -639,37 +644,57 @@ describe('when the model corrects itself mid-turn', () => {
     ],
   })
 
-  it('presents the final circuit as the answer and folds the rest away', async () => {
-    script = [wrong, right, text('Corrected — that is a Bell state.')]
+  const ghz = toolCall('propose_circuit', {
+    numQubits: 3,
+    gates: [
+      { gate: 'H', targets: [0], column: 0 },
+      { gate: 'X', targets: [1], controls: [0], column: 1 },
+      { gate: 'X', targets: [2], controls: [1], column: 2 },
+    ],
+  })
+  const loadButtons = () => screen.queryAllByRole('button', { name: /Load into Circuit Lab/ })
+
+  it('shows only the corrected circuit, with no trace of the attempt it replaced', async () => {
+    script = [wrong, right, text('That is a Bell state.')]
     renderPanel()
     open()
     await ask('build a Bell state')
 
-    await screen.findByText(/Corrected/)
-    // The answer is the corrected circuit, and it is the only one shown by default.
+    await screen.findByText(/That is a Bell state/)
     expect(screen.getByText(/0\.707\|00⟩ \+ 0\.707\|11⟩/)).toBeDefined()
     expect(screen.queryByText(/0\.5\|00⟩/)).toBeNull()
-    expect(screen.getByText(/1 earlier attempt, corrected below/)).toBeDefined()
+    expect(screen.queryByText(/earlier attempt/i)).toBeNull()
+    expect(loadButtons()).toHaveLength(1)
   })
 
-  it('offers to load only the circuit it settled on', async () => {
-    // The real risk: loading a circuit the model itself discarded.
+  it('never puts the wrong diagram on screen, even while the turn is still going', async () => {
+    // Circuits used to appear as each round finished, so a first attempt sat on screen until the
+    // correction replaced it — the "wrong diagram first" a learner saw.
     script = [wrong, right, text('done')]
+    let release!: () => void
+    inFlight = new Promise<void>((resolve) => (release = resolve))
+    holdAtCall = 2 // the first attempt has been made and simulated; the correction has not
+
     renderPanel()
     open()
-    await ask('build a Bell state')
+    fireEvent.change(screen.getByPlaceholderText(/ask a question/i), {
+      target: { value: 'build a Bell state' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
+    await waitFor(() => expect(chatCalls).toBe(2))
+    expect(screen.queryByText(/0\.5\|00⟩/)).toBeNull()
+    expect(loadButtons()).toHaveLength(0)
+
+    await act(async () => {
+      release()
+    })
     await screen.findByText('done')
-    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
-
-    fireEvent.click(screen.getByText(/1 earlier attempt/))
-    // Now visible for comparison, but still not loadable.
-    expect(screen.getByText(/0\.5\|00⟩/)).toBeDefined()
-    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
-    expect(screen.getByText(/earlier attempt — replaced below/)).toBeDefined()
+    expect(screen.getByText(/0\.707\|00⟩ \+ 0\.707\|11⟩/)).toBeDefined()
+    expect(screen.queryByText(/0\.5\|00⟩/)).toBeNull()
   })
 
-  it('counts three attempts as two superseded', async () => {
+  it('keeps only the last of several corrections', async () => {
     const alsoWrong = toolCall('propose_circuit', {
       numQubits: 2,
       gates: [{ gate: 'X', targets: [0], column: 0 }],
@@ -680,29 +705,217 @@ describe('when the model corrects itself mid-turn', () => {
     await ask('build a Bell state')
 
     await screen.findByText(/third time lucky/)
-    expect(screen.getByText(/2 earlier attempts, corrected below/)).toBeDefined()
+    expect(loadButtons()).toHaveLength(1)
+    expect(screen.queryByText(/0\.5\|00⟩/)).toBeNull()
+    expect(screen.queryByText(/1\|10⟩/)).toBeNull()
   })
 
-  it('does not show the same circuit twice when the model re-sends it unchanged', async () => {
-    // Observed against the live model: a re-proposal is sometimes byte-identical to the last one.
-    // That is not a correction, and showing it as one would invent a difference that is not there.
-    script = [wrong, wrong, right, text('done')]
+  it('shows two circuits asked for together', async () => {
+    // Proposed in the same round, before either result was seen — neither can be a correction.
+    script = [
+      [
+        {
+          toolCalls: [...wrong[0].toolCalls!, ...right[0].toolCalls!],
+          done: true,
+        },
+      ],
+      text('Here are both.'),
+    ]
+    renderPanel()
+    open()
+    await ask('show me a product state and an entangled one')
+
+    await screen.findByText('Here are both.')
+    expect(loadButtons()).toHaveLength(2)
+  })
+
+  it('shows circuits of different sizes, even across rounds', async () => {
+    script = [right, ghz, text('Bell, then GHZ.')]
+    renderPanel()
+    open()
+    await ask('show me a Bell state and a GHZ state')
+
+    await screen.findByText('Bell, then GHZ.')
+    expect(loadButtons()).toHaveLength(2)
+  })
+
+  it('does not show the same circuit twice when the model re-sends it', async () => {
+    script = [right, right, text('done')]
     renderPanel()
     open()
     await ask('build a Bell state')
 
     await screen.findByText('done')
-    expect(screen.getByText(/1 earlier attempt, corrected below/)).toBeDefined()
+    expect(loadButtons()).toHaveLength(1)
   })
 
-  it('leaves a single circuit exactly as it was', async () => {
-    script = [right, text('A Bell state.')]
+  it('shows the site circuit for a named algorithm, as the lesson has it', async () => {
+    const { getPreset } = await import('../lib/quantum/presets')
+    script = [toolCall('show_reference_circuit', { name: 'deutsch' }), text('This is Deutsch.')]
+    renderPanel()
+    open()
+    await ask('build a deutsch circuit')
+
+    await screen.findByText('This is Deutsch.')
+    expect(loadButtons()).toHaveLength(1)
+    const { describeOutcome } = await import('../lib/llm/validate')
+    expect(screen.getByText(describeOutcome(getPreset('deutsch')!.circuit).dirac)).toBeDefined()
+  })
+})
+
+describe('every turn ends with an answer', () => {
+  const bell = toolCall('propose_circuit', {
+    numQubits: 2,
+    gates: [
+      { gate: 'H', targets: [0], column: 0 },
+      { gate: 'X', targets: [1], controls: [0], column: 1 },
+    ],
+  })
+
+  it('asks for the answer with tools off when the rounds run out mid-work', async () => {
+    // Four rounds all spent calling tools: the text on screen would be the model's working.
+    script = [
+      [{ content: 'That gives the wrong state, let me try again.', toolCalls: bell[0].toolCalls, done: true }],
+      bell,
+      bell,
+      bell,
+      text('Here is the Bell state.'),
+    ]
     renderPanel()
     open()
     await ask('build a Bell state')
 
-    await screen.findByText(/A Bell state/)
-    expect(screen.queryByText(/earlier attempt/)).toBeNull()
-    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
+    expect(await screen.findByText('Here is the Bell state.')).toBeDefined()
+    expect(screen.queryByText(/let me try again/)).toBeNull()
+    // The closing call offered no tools, so the model could only answer.
+    expect(lastRequest?.tools).toBeUndefined()
+  })
+
+  it('asks again when the model finishes with nothing to say', async () => {
+    // Measured on the live model: 6 of 8 named-algorithm turns ended on an empty message.
+    script = [bell, text(''), text('That is a Bell state.')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    expect(await screen.findByText('That is a Bell state.')).toBeDefined()
+    expect(lastRequest?.tools).toBeUndefined()
+  })
+
+  it('makes no extra call when the model has already answered', async () => {
+    script = [bell, text('A Bell state.')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText('A Bell state.')
+    expect(chatCalls).toBe(2)
+  })
+})
+
+describe('keepCircuit', () => {
+  it('keeps the site\'s own layout when the model rebuilds the same circuit', async () => {
+    const { keepCircuit } = await import('./useAssistant')
+    const { validateProposal } = await import('../lib/llm/validate')
+    const { getPreset } = await import('../lib/quantum/presets')
+    const { describeOutcome } = await import('../lib/llm/validate')
+
+    const preset = getPreset('bell')!.circuit
+    const shown = { ok: true, circuit: preset, outcome: describeOutcome(preset), warnings: [], errors: [] }
+    const rebuilt = validateProposal({
+      numQubits: 2,
+      gates: [
+        { gate: 'H', targets: [0], column: 2 },
+        { gate: 'X', targets: [1], controls: [0], column: 5 },
+      ],
+    })
+
+    const kept = keepCircuit(keepCircuit([], shown, 0), rebuilt, 1)
+    expect(kept).toHaveLength(1)
+    expect(kept[0].result).toBe(shown)
+  })
+})
+
+describe('every answer points to the pages it drew on', () => {
+  /*
+   * So a reader who wants more can go straight to the lesson. Built from what the tools read rather
+   * than from the model's own links, which it writes only some of the time.
+   */
+  const readMore = () => screen.queryByText('Read more:')?.parentElement ?? null
+  const hrefs = () =>
+    Array.from(readMore()?.querySelectorAll('a') ?? []).map((a) => a.getAttribute('href'))
+
+  it('ends with a link to the lesson it read', async () => {
+    script = [toolCall('show_reference_circuit', { name: 'deutsch' }), text('This is Deutsch.')]
+    renderPanel()
+    open()
+    await ask('build a deutsch circuit')
+
+    await screen.findByText('This is Deutsch.')
+    expect(hrefs()).toEqual(['/algorithms/deutsch'])
+    expect(readMore()?.textContent).toMatch(/Deutsch/)
+  })
+
+  it('links every page a search handed back, in order', async () => {
+    const { searchContent } = await import('../lib/llm/retrieval')
+    const expected = searchContent('amplitude amplification diffuser', { limit: 2 }).map(
+      (h) => `/${h.trackId}/${h.slug}`,
+    )
+    script = [toolCall('search_content', { query: 'amplitude amplification diffuser' }), text('It reflects.')]
+    renderPanel()
+    open()
+    await ask('how does the diffuser work?')
+
+    await screen.findByText('It reflects.')
+    expect(hrefs()).toEqual(expected)
+  })
+
+  it('leaves out the page the reader is already on', async () => {
+    script = [
+      toolCall('get_current_page', {}),
+      toolCall('show_reference_circuit', { name: 'deutsch' }),
+      text('Explained.'),
+    ]
+    renderPanel('/algorithms/deutsch')
+    open()
+    await ask('explain this')
+
+    await screen.findByText('Explained.')
+    expect(readMore()).toBeNull()
+  })
+
+  it('names a page once, however many times it was read', async () => {
+    script = [
+      toolCall('open_topic', { name: 'Deutsch’s Algorithm' }),
+      toolCall('show_reference_circuit', { name: 'deutsch' }),
+      text('Done.'),
+    ]
+    renderPanel()
+    open()
+    await ask('build a deutsch circuit')
+
+    await screen.findByText('Done.')
+    expect(hrefs()).toEqual(['/algorithms/deutsch'])
+  })
+
+  it('says nothing when the answer did not draw on the site', async () => {
+    script = [text('Hello! Ask me anything about quantum computing.')]
+    renderPanel()
+    open()
+    await ask('hi')
+
+    await screen.findByText(/Hello!/)
+    expect(readMore()).toBeNull()
+  })
+})
+
+describe('answerSources', () => {
+  it('keeps reading order, drops repeats and the current page, and stops at three', async () => {
+    const { answerSources, MAX_SOURCES } = await import('./useAssistant')
+    const page = (slug: string) => ({ trackId: 'algorithms', slug, title: slug })
+    const read = [page('a'), page('b'), page('a'), page('here'), page('c'), page('d')]
+
+    expect(answerSources(read, 'here').map((p) => p.slug)).toEqual(['a', 'b', 'c'])
+    expect(MAX_SOURCES).toBe(3)
   })
 })

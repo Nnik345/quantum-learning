@@ -73,6 +73,8 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
     abort.abort()
   }, CASE_TIMEOUT_MS)
 
+  let lastRoundCalledTools = false
+
   try {
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (timedOut) break
@@ -96,7 +98,8 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
       if (chunk.stats?.evalTokens) evalTokens += chunk.stats.evalTokens
     }
 
-    if (calls.length === 0) break
+    lastRoundCalledTools = calls.length > 0
+    if (!lastRoundCalledTools) break
 
     messages.push({ role: 'assistant', content: answer, tool_calls: calls })
     for (const call of calls) {
@@ -106,6 +109,20 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
       if (result.circuit?.ok) circuit = result.circuit
       else if (result.circuit) rejected = result.circuit
       messages.push({ role: 'tool', content: result.content, tool_name: call.function.name })
+    }
+  }
+
+  // The same closing call the app makes (see useAssistant): tools off, so the model answers.
+  if (!timedOut && (lastRoundCalledTools || !answer.trim())) {
+    answer = ''
+    for await (const chunk of client.chat({
+      messages,
+      think: readEnv('EVAL_THINK') === '1',
+      options: { temperature: 0, seed: SEED },
+      signal: abort.signal,
+    })) {
+      if (chunk.content) answer += chunk.content
+      if (chunk.stats?.evalTokens) evalTokens += chunk.stats.evalTokens
     }
   }
   } catch (err) {
@@ -123,7 +140,9 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
    * by luck while the behaviour under test — looking the answer up rather than recalling it — did
    * not happen.
    */
-  const missingTools = (testCase.requireTools ?? []).filter((t) => !tools.includes(t))
+  const missingTools = (testCase.requireTools ?? [])
+    .filter((t) => !(Array.isArray(t) ? t.some((one) => tools.includes(one)) : tools.includes(t)))
+    .map((t) => (Array.isArray(t) ? t.join(' or ') : t))
 
   if (testCase.kind === 'circuit') {
     if (!circuit) {

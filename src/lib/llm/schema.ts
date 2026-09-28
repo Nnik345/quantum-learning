@@ -77,7 +77,7 @@ export const CIRCUIT_SCHEMA: Record<string, unknown> = {
     compareTo: {
       type: 'string',
       description:
-        'Name or preset id of a verified circuit this is meant to reproduce, e.g. "grover". The result will report whether yours matches it. Use whenever building a known algorithm.',
+        'Optional: preset id of the site circuit this is based on, e.g. "grover". The result notes whether yours produces the same state.',
     },
   },
   required: ['numQubits', 'gates'],

@@ -16,8 +16,11 @@ export interface CircuitCase {
   prompt: string
   /** Given the validated circuit the model produced, did it do the right thing? */
   check: (result: ValidationResult) => { pass: boolean; detail: string }
-  /** Tools the model must have called. Use only where consulting one is the point of the case. */
-  requireTools?: string[]
+  /**
+   * Tools the model must have called. Use only where consulting one is the point of the case. An
+   * inner array means any one of them will do.
+   */
+  requireTools?: (string | string[])[]
 }
 
 export interface TextCase {
@@ -29,8 +32,8 @@ export interface TextCase {
   expect: RegExp[]
   /** None of these may appear. */
   reject?: RegExp[]
-  /** Tools the model must have called. Use only where consulting one is the point of the case. */
-  requireTools?: string[]
+  /** As for CircuitCase: an inner array means any one of them. */
+  requireTools?: (string | string[])[]
 }
 
 export type EvalCase = CircuitCase | TextCase
@@ -214,7 +217,8 @@ export const EVAL_CASES: EvalCase[] = [
      * the reference was read rather than recalled.
      */
     prompt: 'Build the Bernstein–Vazirani circuit exactly as it appears on this site.',
-    requireTools: ['get_reference_circuit'],
+    // Showing the site's circuit is the intended path now; building from a looked-up copy still counts.
+    requireTools: [['show_reference_circuit', 'get_reference_circuit']],
     check: (r) => {
       const likely = (r.outcome?.probabilities ?? []).filter((x) => x.percent > 1)
       const wrong = likely.filter((x) => !x.label.startsWith('1011'))

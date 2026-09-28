@@ -6,6 +6,7 @@ import { splitLinks } from './links'
 import { CircuitGrid } from '../circuit/CircuitGrid'
 import { requestLoad, isBoardMounted } from '../circuit/circuitBridge'
 import type { ValidationResult } from '../lib/llm/validate'
+import { pagePath } from '../lib/llm/tools'
 import type { DisplayMessage, PythonSnippet } from './useAssistant'
 import { requestInsert, isEditorMounted } from '../lib/python/pythonBridge'
 
@@ -97,20 +98,12 @@ function AssistantText({ text }: { text: string }) {
 }
 
 /**
- * A circuit the model proposed: rendered read-only, with the simulator's own verdict beneath.
+ * A circuit in the answer: rendered read-only, with the simulator's own verdict beneath.
  *
- * `superseded` marks an attempt the model itself replaced later in the turn. Those stay visible —
- * watching a wrong circuit get corrected is worth something on a learning site — but they are
- * dimmed and lose the load button, because the one thing they must never be is mistaken for the
- * answer.
+ * Only final versions reach here — attempts the tutor replaced mid-turn are dropped before display
+ * (see keepCircuit in useAssistant), so every card is one the reader can trust and load.
  */
-function ProposedCircuit({
-  result,
-  superseded = false,
-}: {
-  result: ValidationResult
-  superseded?: boolean
-}) {
+function ProposedCircuit({ result }: { result: ValidationResult }) {
   const [loaded, setLoaded] = useState(false)
   if (!result.circuit || !result.outcome) return null
 
@@ -121,16 +114,7 @@ function ProposedCircuit({
   }
 
   return (
-    <div
-      className={`overflow-hidden rounded-lg border border-line bg-ground/50 ${
-        superseded ? 'opacity-60' : ''
-      }`}
-    >
-      {superseded && (
-        <div className="border-b border-line px-3 py-1 text-[10px] uppercase tracking-wider text-ink-faint">
-          earlier attempt — replaced below
-        </div>
-      )}
+    <div className="overflow-hidden rounded-lg border border-line bg-ground/50">
       <div className="overflow-x-auto p-2">
         <div className="pointer-events-none w-max origin-top-left scale-90">
           <CircuitGrid
@@ -162,24 +146,22 @@ function ProposedCircuit({
           </div>
         )}
 
-        {!superseded && (
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={load}
-              className="rounded border border-cyan px-2 py-0.5 text-[11px] text-cyan transition-colors hover:bg-cyan/10"
-            >
-              Load into Circuit Lab
-            </button>
-            {loaded && !isBoardMounted() && (
-              <Link to="/circuit" className="text-[11px] text-cyan hover:underline">
-                open the lab →
-              </Link>
-            )}
-            {loaded && isBoardMounted() && (
-              <span className="text-[10px] text-ink-faint">loaded — Ctrl+Z to undo</span>
-            )}
-          </div>
-        )}
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            onClick={load}
+            className="rounded border border-cyan px-2 py-0.5 text-[11px] text-cyan transition-colors hover:bg-cyan/10"
+          >
+            Load into Circuit Lab
+          </button>
+          {loaded && !isBoardMounted() && (
+            <Link to="/circuit" className="text-[11px] text-cyan hover:underline">
+              open the lab →
+            </Link>
+          )}
+          {loaded && isBoardMounted() && (
+            <span className="text-[10px] text-ink-faint">loaded — Ctrl+Z to undo</span>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -226,50 +208,6 @@ function SuggestedPython({ snippet }: { snippet: PythonSnippet }) {
         )}
       </div>
     </div>
-  )
-}
-
-/**
- * Every circuit the model proposed this turn, presented as one answer.
- *
- * The model is told to re-propose when the simulator reports a circuit does not do what it intended
- * (see systemPrompt.ts), so a turn can end with two or three accepted circuits where only the last
- * is the answer. Rendering them as a flat list of identical cards left the reader to guess which
- * one to trust, and offered to load the wrong one — the opposite of what the correction was for.
- *
- * So the last one is the answer, and the attempts it replaced are folded away behind a toggle.
- * Hiding them entirely would be simpler, but seeing a wrong circuit corrected is worth reading on a
- * site that teaches this, and it is honest about how the answer was arrived at.
- */
-function CircuitAttempts({ circuits }: { circuits: ValidationResult[] }) {
-  const [showEarlier, setShowEarlier] = useState(false)
-  if (circuits.length === 0) return null
-
-  const answer = circuits[circuits.length - 1]
-  const superseded = circuits.slice(0, -1)
-
-  return (
-    <>
-      {superseded.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowEarlier((v) => !v)}
-            className="text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-dim"
-          >
-            {showEarlier ? '▾ hide' : '▸ show'} {superseded.length} earlier{' '}
-            {superseded.length === 1 ? 'attempt' : 'attempts'}, corrected below
-          </button>
-          {showEarlier && (
-            <div className="mt-1 space-y-2">
-              {superseded.map((circuit, i) => (
-                <ProposedCircuit key={i} result={circuit} superseded />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      <ProposedCircuit result={answer} />
-    </>
   )
 }
 
@@ -322,11 +260,33 @@ export function MessageView({ message }: { message: DisplayMessage }) {
             </div>
           )}
 
-          <CircuitAttempts circuits={message.circuits} />
+          {message.circuits.map((circuit, i) => (
+            <ProposedCircuit key={i} result={circuit} />
+          ))}
 
           {message.snippets.map((snippet, i) => (
             <SuggestedPython key={i} snippet={snippet} />
           ))}
+
+          {/*
+            Where to read more. Built from the pages the tools actually read, not from the model's
+            own citations — which it writes only some of the time — so every answer that drew on
+            the site ends by pointing back to it.
+          */}
+          {!message.streaming && message.sources && message.sources.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-line pt-2 text-[11px] text-ink-faint">
+              <span>Read more:</span>
+              {message.sources.map((page) => (
+                <Link
+                  key={pagePath(page)}
+                  to={pagePath(page)}
+                  className="text-cyan underline decoration-cyan/40 underline-offset-2 hover:decoration-cyan"
+                >
+                  {page.title}
+                </Link>
+              ))}
+            </div>
+          )}
 
           {message.streaming && !message.content && (
             <div className="text-[11px] text-ink-faint">…</div>

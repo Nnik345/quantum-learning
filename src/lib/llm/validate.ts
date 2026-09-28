@@ -334,6 +334,39 @@ export function validateProposal(raw: unknown): ValidationResult {
   }
 }
 
+/**
+ * A circuit written in exactly the shape propose_circuit accepts — the inverse of validateProposal.
+ *
+ * This is what the model is handed when it looks up a reference. It used to get a prose rendering
+ * ("column 1: M on q0", "Non-default inputs: q1=1") and had to retype it in this format, and the two
+ * disagree in three places: columns count from 1 in one and 0 in the other, the display label "M" is
+ * not the gate id "MEASURE", and the inputs line is a different vocabulary from the `inputs` array.
+ * Each of those produced a wrong first attempt on the live model — Deutsch built with its ancilla
+ * left at |0⟩ was one. Handing over the real shape leaves nothing to translate.
+ *
+ * Custom amplitudes cannot be expressed in this format (the model cannot set them either), so such
+ * a wire is written as "0". No preset uses one.
+ */
+export function toProposal(circuit: Circuit): ProposedCircuit {
+  const inputs = circuit.inputs.map((input) => (input.preset === 'custom' ? '0' : input.preset))
+  const gates = [...circuit.placements]
+    .sort((a, b) => a.column - b.column)
+    .map((p): ProposedGate => ({
+      gate: p.gate,
+      targets: p.targets,
+      ...(p.controls.length ? { controls: p.controls } : {}),
+      ...(p.params.length ? { angle: p.params[0] } : {}),
+      column: p.column,
+    }))
+
+  return {
+    numQubits: circuit.numQubits,
+    // Omitted when every wire starts at |0⟩, as the schema invites — one less thing to copy.
+    ...(inputs.some((i) => i !== '0') ? { inputs } : {}),
+    gates,
+  }
+}
+
 /** Compact, token-cheap summary of a validated circuit to hand back to the model. */
 export function summariseForModel(result: ValidationResult): string {
   if (!result.ok || !result.circuit || !result.outcome) {

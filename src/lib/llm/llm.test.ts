@@ -166,10 +166,11 @@ describe('system prompt', () => {
 // --- tool definitions ------------------------------------------------------
 
 describe('tool definitions', () => {
-  it('exposes exactly the nine tools, none of which execute anything the user did not ask for', () => {
+  it('exposes exactly the ten tools, none of which execute anything the user did not ask for', () => {
     expect(TOOL_DEFINITIONS.map((t) => t.function.name)).toEqual([
       'search_content',
       'get_current_page',
+      'show_reference_circuit',
       'get_reference_circuit',
       'open_topic',
       'propose_circuit',

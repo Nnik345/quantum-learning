@@ -1,9 +1,9 @@
 /**
- * The four tools the model may call, and their dispatch.
+ * The tools the model may call, and their dispatch.
  *
  * Every one is read-only or validated. None writes a file, executes code, or makes a network call,
  * so a hostile question cannot do anything worse than produce a silly circuit. The user's free text
- * reaches only these four functions.
+ * reaches only the functions in TOOL_DEFINITIONS.
  */
 
 import type { Circuit } from '../quantum/circuit'
@@ -23,7 +23,13 @@ import { ALGORITHM_PRESETS } from '../quantum/presets'
 import { getTopic } from '../../content/registry'
 import { pathStepFor } from '../../content/path'
 import { getPreset } from '../quantum/presets'
-import { validateProposal, summariseForModel, describeOutcome, type ValidationResult } from './validate'
+import {
+  validateProposal,
+  summariseForModel,
+  describeOutcome,
+  toProposal,
+  type ValidationResult,
+} from './validate'
 import { CIRCUIT_SCHEMA } from './schema'
 import type { ToolDefinition } from './types'
 
@@ -55,9 +61,26 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'show_reference_circuit',
+      description:
+        'Put the site\'s own circuit for a known algorithm on the reader\'s screen, exactly as the lesson has it. Use this whenever they ask to build, show or explain a named algorithm (Grover, teleportation, Deutsch, Bell state, ...) or a circuit printed on the page. Do not rebuild it with propose_circuit. Call with no name to list what exists.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Algorithm name or preset id, e.g. "grover", "deutsch", "Bell state".',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_reference_circuit',
       description:
-        'Look up a VERIFIED circuit for a known algorithm — its exact gates, what it really produces, and the page it appears on. Call this BEFORE building any named algorithm, so you are working from ground truth rather than memory. Call it with no name to list every circuit available.',
+        'Read the site\'s own circuit for a known algorithm, in the exact format propose_circuit takes, to start a CHANGED version from. For the algorithm as it is, use show_reference_circuit instead. Call with no name to list every circuit available.',
       parameters: {
         type: 'object',
         properties: {
@@ -89,7 +112,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     function: {
       name: 'propose_circuit',
       description:
-        'Build a circuit in the simulator. It is validated and run, and the tool returns what it ACTUALLY does — describe that, not what you expected. Use this whenever asked to build, show or demonstrate a circuit. When building a known algorithm, pass compareTo with its name to have your circuit checked against the verified one.',
+        'Build a circuit the site does not already have — a new one, or a changed version of a known algorithm. It is validated and run, and the tool returns what it ACTUALLY does; describe that, not what you expected. For a named algorithm as the site has it, use show_reference_circuit instead.',
       parameters: CIRCUIT_SCHEMA,
     },
   },
@@ -180,6 +203,15 @@ export interface ToolContext {
   turn?: TurnMemory
 }
 
+/** A lesson page on this site. Always one that exists — these come from the content registry. */
+export interface PageRef {
+  trackId: string
+  slug: string
+  title: string
+}
+
+export const pagePath = (page: PageRef) => `/${page.trackId}/${page.slug}`
+
 export interface ToolResult {
   /** Text handed back to the model. */
   content: string
@@ -187,7 +219,18 @@ export interface ToolResult {
   circuit?: ValidationResult
   /** Python the UI should offer to put in the editor. */
   python?: { code: string; explanation?: string }
+  /**
+   * The pages this result was read from, so the answer can point the reader to them.
+   *
+   * Recorded here rather than left to the model: asked to cite, it sometimes does and sometimes
+   * does not, but the code always knows which page a piece of text came from.
+   */
+  sources?: PageRef[]
 }
+
+/** A page reference from anything that carries one, dropping extra fields. */
+const pageRef = (p: { trackId: string; slug: string; title: string } | undefined): PageRef[] =>
+  p ? [{ trackId: p.trackId, slug: p.slug, title: p.title }] : []
 
 /**
  * Find a verified circuit by id or name, tolerantly.
@@ -206,32 +249,71 @@ export function findPreset(query: string) {
     name: norm(preset.name),
   }))
 
+  // Words that appear across the preset names and describe half the site, so they identify nothing.
+  // Without this, "quantum gastronomy" found the random number generator and "state of the art" the
+  // Bell state — harmless for a lookup, but show_reference_circuit would put it on the reader's screen.
+  const distinctive = (w: string) => w.length >= 4 && !GENERIC_WORDS.has(w)
+
   return (
     candidates.find((c) => c.id === wanted || c.name === wanted)?.preset ??
     candidates.find((c) => c.id.includes(wanted) || c.name.includes(wanted))?.preset ??
     // Last resort: any query word that is distinctive enough to name a preset.
     candidates.find((c) =>
-      wanted.split(' ').some((w) => w.length >= 4 && (c.id.includes(w) || c.name.includes(w))),
+      wanted.split(' ').some((w) => distinctive(w) && (c.id.includes(w) || c.name.includes(w))),
     )?.preset
   )
 }
 
-/** One verified circuit, rendered for the model: gates, real outcome, and where it is printed. */
+const GENERIC_WORDS = new Set(['quantum', 'state', 'states', 'algorithm', 'circuit'])
+
+/**
+ * One of the site's circuits, rendered for the model to build a changed version from.
+ *
+ * The gates are given as the exact JSON propose_circuit takes (see toProposal for why a prose list
+ * was not good enough). Nothing here is phrased as a claim to pass on — the reader should hear about
+ * the algorithm, not about how the tutor checked its work.
+ */
 function describeReference(preset: (typeof ALGORITHM_PRESETS)[number]): string {
   const outcome = describeOutcome(preset.circuit)
   const page = presetPage(preset.id)
   return [
-    `VERIFIED CIRCUIT "${preset.id}" — ${preset.name}`,
+    `SITE CIRCUIT "${preset.id}" — ${preset.name}`,
     preset.summary,
-    describeCircuit(preset.circuit),
+    'In propose_circuit format — copy it, then change only what you mean to change:',
+    JSON.stringify(toProposal(preset.circuit)),
     `Produces: ${outcome.dirac}`,
     `Outcomes: ${outcome.probabilities.slice(0, 6).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}`,
     outcome.entangled.length ? `Entangled: q${outcome.entangled.join(', q')}` : 'No entanglement.',
     page ? `Explained on /${page.trackId}/${page.slug} ("${page.title}")` : '',
-    'This circuit is tested and known correct. Build from it rather than from memory.',
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** What the model is told after a site circuit has been put on the reader's screen. */
+function describeShown(preset: (typeof ALGORITHM_PRESETS)[number]): string {
+  const outcome = describeOutcome(preset.circuit)
+  const page = presetPage(preset.id)
+  return [
+    `Now on the reader's screen: ${preset.name}, exactly as the site's lesson has it.`,
+    preset.summary,
+    describeCircuit(preset.circuit),
+    `Final state: ${outcome.dirac}`,
+    `Outcomes: ${outcome.probabilities.slice(0, 6).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}`,
+    outcome.entangled.length ? `Entangled: q${outcome.entangled.join(', q')}` : 'No entanglement.',
+    page ? `Explained on /${page.trackId}/${page.slug} ("${page.title}") — link it.` : '',
+    'Explain how it works. Do not build it again.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** The list of site circuits, for a blind or unmatched lookup. */
+function presetCatalogue(): string {
+  return ALGORITHM_PRESETS.map((p) => {
+    const page = presetPage(p.id)
+    return `  "${p.id}" — ${p.name}${page ? ` (/${page.trackId}/${page.slug})` : ''}`
+  }).join('\n')
 }
 
 /** Human-readable gate list, so the model sees a circuit the way the reader does. */
@@ -281,11 +363,12 @@ export async function dispatchTool(
         // Circuits come after the prose and are capped, so they can never crowd lesson text out.
         for (const hit of circuits) {
           parts.push(
-            `--- verified circuit, ${hit.page ? `printed on /${hit.page.trackId}/${hit.page.slug}` : 'not printed on a page'} ---\n` +
+            `--- site circuit, ${hit.page ? `printed on /${hit.page.trackId}/${hit.page.slug}` : 'not printed on a page'} — show it with show_reference_circuit ---\n` +
               describeReference(hit.preset),
           )
         }
-        return { content: parts.join('\n\n') }
+        // The lesson pages it was handed in full. Circuit hits are extras and not counted.
+        return { content: parts.join('\n\n'), sources: hits.flatMap(pageRef) }
       }
 
       case 'propose_circuit': {
@@ -307,19 +390,23 @@ export async function dispatchTool(
           const reference = findPreset(compareTo)
           if (!reference) {
             // Only reachable for a name the model supplied; a remembered id always resolves.
-            content += `\n\nNo verified circuit named "${compareTo}" — call get_reference_circuit with no name to see what exists.`
+            content += `\n\nThe site has no circuit named "${compareTo}" — call get_reference_circuit with no name to see what exists.`
           } else {
             const theirs = describeOutcome(reference.circuit)
             const same = theirs.dirac === result.outcome.dirac
-            // Said aloud when unrequested, so a model deliberately building a variant knows why it
-            // is being told this and can say so rather than "correcting" a circuit that was right.
-            const how = named ? '' : ` (checked automatically against the circuit you looked up)`
+            /*
+             * Framed as private. Worded as a verdict ("Matches the verified…") the model repeated it
+             * to the reader — "I verified this against the website" — which tells a learner about
+             * the tutor's working rather than the physics, and invites the question of what failed.
+             * The instruction not to mention it is also in the system prompt; it is repeated here
+             * because this is the text the model is looking at when it writes the answer.
+             */
             content += same
-              ? `\n\nMatches the verified "${reference.id}" circuit${how}, which also produces ${theirs.dirac}.`
-              : `\n\nDIFFERS from the verified "${reference.id}" circuit${how}, which produces ${theirs.dirac} ` +
-                `(${theirs.probabilities.slice(0, 4).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}). ` +
-                `Yours produces ${result.outcome.dirac}. Call get_reference_circuit to see its gates, then fix yours` +
-                `${named ? '' : ', or say plainly that you are building something different and why'}.`
+              ? `\n\nInternal check, not for the reader: same result as the site's "${reference.id}" circuit.`
+              : `\n\nInternal check, not for the reader: the site's "${reference.id}" circuit produces ${theirs.dirac} ` +
+                `(${theirs.probabilities.slice(0, 4).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}), ` +
+                `yours produces ${result.outcome.dirac}. If you meant to reproduce it, use show_reference_circuit ` +
+                `instead; if you are deliberately changing it, carry on and explain the change.`
           }
         }
         return { content, circuit: result }
@@ -332,14 +419,10 @@ export async function dispatchTool(
         if (!preset) {
           // Blind or unmatched calls list everything, so the model can discover what exists
           // instead of needing to already know the ids.
-          const catalogue = ALGORITHM_PRESETS.map((p) => {
-            const page = presetPage(p.id)
-            return `  "${p.id}" — ${p.name}${page ? ` (/${page.trackId}/${page.slug})` : ''}`
-          }).join('\n')
           return {
             content:
-              (name ? `No verified circuit matches "${name}".\n\n` : '') +
-              `Verified circuits available:\n${catalogue}\n\nCall this tool again with one of those names.`,
+              (name ? `The site has no circuit matching "${name}".\n\n` : '') +
+              `Site circuits available:\n${presetCatalogue()}\n\nCall this tool again with one of those names.`,
           }
         }
         /*
@@ -348,7 +431,40 @@ export async function dispatchTool(
          * wrong circuit reaches the reader looking clean.
          */
         if (context.turn) context.turn.reference = preset.id
-        return { content: describeReference(preset) }
+        return { content: describeReference(preset), sources: pageRef(presetPage(preset.id)) }
+      }
+
+      case 'show_reference_circuit': {
+        const name = typeof args.name === 'string' ? args.name.trim() : ''
+        const preset = name ? findPreset(name) : undefined
+        if (!preset) {
+          return {
+            content:
+              (name ? `The site has no circuit matching "${name}".\n\n` : '') +
+              `Site circuits available:\n${presetCatalogue()}\n\n` +
+              'Call this tool again with one of those names, or build something new with propose_circuit.',
+          }
+        }
+
+        /*
+         * The site's circuit itself, not a rebuild of it. Asking the model to retype a circuit the
+         * site already has is where the wrong-first-then-corrected diagrams came from; for a named
+         * algorithm there is nothing for it to get right, so there is nothing for it to get wrong.
+         * The preset is already legal and simulated by the same code as everything else — it is what
+         * the lesson page renders — so it goes to the reader as it is.
+         */
+        if (context.turn) context.turn.reference = preset.id
+        return {
+          content: describeShown(preset),
+          sources: pageRef(presetPage(preset.id)),
+          circuit: {
+            ok: true,
+            circuit: preset.circuit,
+            outcome: describeOutcome(preset.circuit),
+            warnings: [],
+            errors: [],
+          },
+        }
       }
 
       case 'open_topic': {
@@ -378,6 +494,7 @@ export async function dispatchTool(
           ]
             .filter((l) => l !== '')
             .join('\n'),
+          sources: pageRef(found),
         }
       }
 
@@ -432,7 +549,8 @@ export async function dispatchTool(
           lines.push('', 'This page prints no circuits.')
         }
 
-        return { content: lines.filter((l) => l !== '').join('\n') }
+        // Reported like any other source; the panel leaves out the page the reader is already on.
+        return { content: lines.filter((l) => l !== '').join('\n'), sources: pageRef(retrieved) }
       }
 
       case 'get_current_circuit': {
@@ -503,7 +621,7 @@ export async function dispatchTool(
               .join(', ')}`,
           )
         }
-        return { content: lines.join('\n') }
+        return { content: lines.join('\n'), sources: presetId ? pageRef(presetPage(presetId)) : [] }
       }
 
       case 'get_python_code': {
