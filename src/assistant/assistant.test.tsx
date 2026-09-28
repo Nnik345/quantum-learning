@@ -616,3 +616,93 @@ describe('choosing a model', () => {
     expect(screen.queryByText(/first reply will be slow/i)).toBeNull()
   })
 })
+
+describe('when the model corrects itself mid-turn', () => {
+  /*
+   * The prompt tells the model to call propose_circuit again when the simulator reports its circuit
+   * does not do what it intended, so several accepted circuits in one turn is normal and the LAST
+   * one is the answer. Rendering them as equal cards made the reader guess, and let them load a
+   * circuit the model had already thrown away.
+   */
+  const wrong = toolCall('propose_circuit', {
+    numQubits: 2,
+    gates: [
+      { gate: 'H', targets: [0], column: 0 },
+      { gate: 'H', targets: [1], column: 0 },
+    ],
+  })
+  const right = toolCall('propose_circuit', {
+    numQubits: 2,
+    gates: [
+      { gate: 'H', targets: [0], column: 0 },
+      { gate: 'X', targets: [1], controls: [0], column: 1 },
+    ],
+  })
+
+  it('presents the final circuit as the answer and folds the rest away', async () => {
+    script = [wrong, right, text('Corrected — that is a Bell state.')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText(/Corrected/)
+    // The answer is the corrected circuit, and it is the only one shown by default.
+    expect(screen.getByText(/0\.707\|00⟩ \+ 0\.707\|11⟩/)).toBeDefined()
+    expect(screen.queryByText(/0\.5\|00⟩/)).toBeNull()
+    expect(screen.getByText(/1 earlier attempt, corrected below/)).toBeDefined()
+  })
+
+  it('offers to load only the circuit it settled on', async () => {
+    // The real risk: loading a circuit the model itself discarded.
+    script = [wrong, right, text('done')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText('done')
+    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
+
+    fireEvent.click(screen.getByText(/1 earlier attempt/))
+    // Now visible for comparison, but still not loadable.
+    expect(screen.getByText(/0\.5\|00⟩/)).toBeDefined()
+    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
+    expect(screen.getByText(/earlier attempt — replaced below/)).toBeDefined()
+  })
+
+  it('counts three attempts as two superseded', async () => {
+    const alsoWrong = toolCall('propose_circuit', {
+      numQubits: 2,
+      gates: [{ gate: 'X', targets: [0], column: 0 }],
+    })
+    script = [wrong, alsoWrong, right, text('third time lucky')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText(/third time lucky/)
+    expect(screen.getByText(/2 earlier attempts, corrected below/)).toBeDefined()
+  })
+
+  it('does not show the same circuit twice when the model re-sends it unchanged', async () => {
+    // Observed against the live model: a re-proposal is sometimes byte-identical to the last one.
+    // That is not a correction, and showing it as one would invent a difference that is not there.
+    script = [wrong, wrong, right, text('done')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText('done')
+    expect(screen.getByText(/1 earlier attempt, corrected below/)).toBeDefined()
+  })
+
+  it('leaves a single circuit exactly as it was', async () => {
+    script = [right, text('A Bell state.')]
+    renderPanel()
+    open()
+    await ask('build a Bell state')
+
+    await screen.findByText(/A Bell state/)
+    expect(screen.queryByText(/earlier attempt/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: /Load into Circuit Lab/ })).toHaveLength(1)
+  })
+})

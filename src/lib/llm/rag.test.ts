@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { dispatchTool, findPreset, TOOL_DEFINITIONS } from './tools'
+import { dispatchTool, findPreset, newTurn, TOOL_DEFINITIONS } from './tools'
 import { searchCircuits, presetPage } from './retrieval'
 import { buildSystemPrompt, estimateTokens, MAX_SYSTEM_PROMPT_TOKENS } from './systemPrompt'
 import { ALGORITHM_PRESETS, getPreset } from '../quantum/presets'
@@ -150,5 +150,94 @@ describe('the prompt fits, and says what it must', () => {
     expect(prompt).toMatch(/CITE the page/)
     // The catalogue lets it name a circuit without a discovery round-trip.
     for (const preset of ALGORITHM_PRESETS) expect(prompt).toContain(preset.id)
+  })
+})
+
+describe('the comparison happens whether or not the model asks for it', () => {
+  /*
+   * Measured against the live model on "build a Deutsch circuit": it looked the reference up every
+   * time and then skipped compareTo in a quarter of the turns. One of those skipped turns produced
+   * a circuit missing the |1⟩ ancilla — right gates, wrong initial state, so q0 measures 0 and the
+   * algorithm answers "constant" for a balanced oracle. Nothing marked it, because nothing checked.
+   */
+  const deutschGates = [
+    { gate: 'H', targets: [0], column: 0 },
+    { gate: 'H', targets: [1], column: 0 },
+    { gate: 'X', targets: [1], controls: [0], column: 1 },
+    { gate: 'H', targets: [0], column: 2 },
+    { gate: 'MEASURE', targets: [0], column: 3 },
+  ]
+
+  it('catches the missing ancilla that reached a reader', async () => {
+    const turn = newTurn()
+    await dispatchTool('get_reference_circuit', { name: 'deutsch' }, { turn })
+    const r = await dispatchTool('propose_circuit', { numQubits: 2, gates: deutschGates }, { turn })
+
+    expect(r.circuit?.outcome?.dirac).toBe('0.707|00⟩ + 0.707|01⟩')
+    expect(r.content).toMatch(/DIFFERS/)
+    expect(r.content).toMatch(/checked automatically/)
+  })
+
+  it('confirms the same circuit once the ancilla is right', async () => {
+    const turn = newTurn()
+    await dispatchTool('get_reference_circuit', { name: 'deutsch' }, { turn })
+    const r = await dispatchTool(
+      'propose_circuit',
+      { numQubits: 2, gates: deutschGates, inputs: ['0', '1'] },
+      { turn },
+    )
+
+    expect(r.content).toMatch(/Matches the verified "deutsch"/)
+    expect(r.content).toMatch(/checked automatically/)
+  })
+
+  it('leaves room to build something else on purpose', async () => {
+    // A reader can ask for a variant. The model is told what differs and how to say so, rather
+    // than being pushed to "correct" a circuit that was what was asked for.
+    const turn = newTurn()
+    await dispatchTool('get_reference_circuit', { name: 'deutsch' }, { turn })
+    const r = await dispatchTool('propose_circuit', { numQubits: 2, gates: deutschGates }, { turn })
+
+    expect(r.content).toMatch(/say plainly that you are building something different/)
+  })
+
+  it('prefers the reference the model named over the one it looked up', async () => {
+    const turn = newTurn()
+    await dispatchTool('get_reference_circuit', { name: 'deutsch' }, { turn })
+    const r = await dispatchTool(
+      'propose_circuit',
+      {
+        numQubits: 2,
+        gates: [
+          { gate: 'H', targets: [0], column: 0 },
+          { gate: 'X', targets: [1], controls: [0], column: 1 },
+        ],
+        compareTo: 'bell',
+      },
+      { turn },
+    )
+
+    expect(r.content).toMatch(/Matches the verified "bell"/)
+    expect(r.content).not.toMatch(/deutsch/)
+    // Asked for explicitly, so it is not announced as automatic.
+    expect(r.content).not.toMatch(/checked automatically/)
+  })
+
+  it('does not carry a reference from one question into the next', async () => {
+    // Two questions about two algorithms must not be compared against each other.
+    const first = newTurn()
+    await dispatchTool('get_reference_circuit', { name: 'deutsch' }, { turn: first })
+
+    const second = newTurn()
+    const r = await dispatchTool('propose_circuit', { numQubits: 2, gates: deutschGates }, { turn: second })
+    expect(r.content).not.toMatch(/DIFFERS|Matches the verified/)
+  })
+
+  it('remembers nothing from a request to list what exists', async () => {
+    // Listing the catalogue names no particular circuit, so there is nothing to compare against.
+    const turn = newTurn()
+    await dispatchTool('get_reference_circuit', {}, { turn })
+    const r = await dispatchTool('propose_circuit', { numQubits: 2, gates: deutschGates }, { turn })
+    expect(r.content).not.toMatch(/DIFFERS|Matches the verified/)
   })
 })

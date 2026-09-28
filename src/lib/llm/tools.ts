@@ -156,11 +156,28 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
 ]
 
+/**
+ * What one turn remembers between its own tool calls.
+ *
+ * Only the verified circuit the model looked up, so a proposal can be checked against it even when
+ * the model does not ask for the check. Lives for one turn and is never shared between them: two
+ * questions about two algorithms must not compare against each other's reference.
+ */
+export interface TurnMemory {
+  /** Preset id of the last verified circuit fetched this turn. */
+  reference?: string
+}
+
+/** A fresh memory for one turn. Callers make one per question. */
+export const newTurn = (): TurnMemory => ({})
+
 export interface ToolContext {
   /** The circuit on the user's board, if any. */
   currentCircuit?: Circuit
   /** Slug of the page the reader is on, to bias retrieval. */
   currentSlug?: string
+  /** Scratch memory for this turn. Without one, the automatic comparison cannot happen. */
+  turn?: TurnMemory
 }
 
 export interface ToolResult {
@@ -275,22 +292,34 @@ export async function dispatchTool(
         const result = validateProposal(args)
         let content = summariseForModel(result)
 
-        // An explicit self-check against ground truth. The model names what it is implementing,
-        // so nothing has to be inferred — a guessed comparison would contradict the reader
-        // whenever the guess was wrong.
-        const compareTo = typeof args.compareTo === 'string' ? args.compareTo.trim() : ''
+        /*
+         * A check against ground truth. The model may name what it is implementing with compareTo,
+         * but it cannot be relied on to: measured over Deutsch turns, it looked the reference up
+         * every time and then skipped the comparison in a quarter of them — and a circuit that is
+         * wrong AND unchecked reaches the reader with nothing to mark it.
+         *
+         * So when it does not ask, the reference it looked up THIS TURN is used instead. Nothing is
+         * guessed: both paths compare against a circuit the model itself named.
+         */
+        const named = typeof args.compareTo === 'string' ? args.compareTo.trim() : ''
+        const compareTo = named || context.turn?.reference || ''
         if (compareTo && result.ok && result.outcome) {
           const reference = findPreset(compareTo)
           if (!reference) {
+            // Only reachable for a name the model supplied; a remembered id always resolves.
             content += `\n\nNo verified circuit named "${compareTo}" — call get_reference_circuit with no name to see what exists.`
           } else {
             const theirs = describeOutcome(reference.circuit)
             const same = theirs.dirac === result.outcome.dirac
+            // Said aloud when unrequested, so a model deliberately building a variant knows why it
+            // is being told this and can say so rather than "correcting" a circuit that was right.
+            const how = named ? '' : ` (checked automatically against the circuit you looked up)`
             content += same
-              ? `\n\nMatches the verified "${reference.id}" circuit, which also produces ${theirs.dirac}.`
-              : `\n\nDIFFERS from the verified "${reference.id}" circuit, which produces ${theirs.dirac} ` +
+              ? `\n\nMatches the verified "${reference.id}" circuit${how}, which also produces ${theirs.dirac}.`
+              : `\n\nDIFFERS from the verified "${reference.id}" circuit${how}, which produces ${theirs.dirac} ` +
                 `(${theirs.probabilities.slice(0, 4).map((x) => `${x.label} ${x.percent.toFixed(1)}%`).join(', ')}). ` +
-                `Yours produces ${result.outcome.dirac}. Call get_reference_circuit to see its gates, then fix yours.`
+                `Yours produces ${result.outcome.dirac}. Call get_reference_circuit to see its gates, then fix yours` +
+                `${named ? '' : ', or say plainly that you are building something different and why'}.`
           }
         }
         return { content, circuit: result }
@@ -313,6 +342,12 @@ export async function dispatchTool(
               `Verified circuits available:\n${catalogue}\n\nCall this tool again with one of those names.`,
           }
         }
+        /*
+         * Remembered so propose_circuit can check against it unasked. The model reliably looks a
+         * reference up and then sometimes forgets to compare against it — which is exactly when a
+         * wrong circuit reaches the reader looking clean.
+         */
+        if (context.turn) context.turn.reference = preset.id
         return { content: describeReference(preset) }
       }
 

@@ -9,10 +9,11 @@ import { useCallback, useRef, useState } from 'react'
 
 import { OllamaClient, type HealthResult } from '../lib/llm/client'
 import { buildSystemPrompt, type PromptContext } from '../lib/llm/systemPrompt'
-import { TOOL_DEFINITIONS, dispatchTool } from '../lib/llm/tools'
+import { TOOL_DEFINITIONS, dispatchTool, newTurn } from '../lib/llm/tools'
 import type { ValidationResult } from '../lib/llm/validate'
 import type { ChatMessage, ToolCall } from '../lib/llm/types'
 import { getCurrentCircuit } from '../circuit/circuitBridge'
+import { serialiseCircuit } from '../lib/quantum/circuit'
 
 const MAX_TOOL_ROUNDS = 4
 /** Conversation turns kept in context. Retrieved content is re-fetched each turn anyway. */
@@ -23,7 +24,12 @@ export interface DisplayMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  /** Circuits produced this turn, already validated and simulated. */
+  /**
+   * Circuits produced this turn, already validated and simulated, in the order they were proposed.
+   *
+   * More than one means the model corrected itself mid-turn: the LAST is its answer and the ones
+   * before it were superseded. MessageView presents them that way, so keep the order.
+   */
   circuits: ValidationResult[]
   /** Python the tutor offered this turn, for the user to accept into their editor. */
   snippets: PythonSnippet[]
@@ -61,6 +67,18 @@ export function wantsDeepThinking(_text: string): boolean {
 
 let nextId = 0
 const newId = () => `m${nextId++}`
+
+/**
+ * Whether a proposal is the one already at the end of the list.
+ *
+ * A model that re-proposes after a disappointing result sometimes sends back exactly what it sent
+ * before. That is not a correction to show the reader twice — it is the same circuit.
+ */
+function repeatsLast(circuits: ValidationResult[], candidate: ValidationResult): boolean {
+  const last = circuits.at(-1)
+  if (!last?.circuit || !candidate.circuit) return false
+  return JSON.stringify(serialiseCircuit(last.circuit)) === JSON.stringify(serialiseCircuit(candidate.circuit))
+}
 
 export function useAssistant(
   context: PromptContext & { currentSlug?: string },
@@ -136,6 +154,10 @@ export function useAssistant(
       const abort = new AbortController()
       abortRef.current = abort
 
+      // Scoped to this question: what the model looks up now must not be compared against a
+      // circuit it asked for two questions ago.
+      const turn = newTurn()
+
       const think = wantsDeepThinking(question)
       setStatus(think ? 'thinking' : 'streaming')
 
@@ -197,8 +219,11 @@ export function useAssistant(
             const result = await dispatchTool(name, call.function?.arguments ?? {}, {
               currentCircuit: getCurrentCircuit(),
               currentSlug: context.currentSlug,
+              turn,
             })
-            if (result.circuit?.ok) circuits.push(result.circuit)
+            if (result.circuit?.ok && !repeatsLast(circuits, result.circuit)) {
+              circuits.push(result.circuit)
+            }
             if (result.python) snippets.push(result.python)
             wire.push({ role: 'tool', content: result.content, tool_name: name })
           }

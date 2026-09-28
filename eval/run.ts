@@ -9,7 +9,7 @@
 
 import { OllamaClient, DEFAULT_MODEL } from '../src/lib/llm/client'
 import { buildSystemPrompt } from '../src/lib/llm/systemPrompt'
-import { TOOL_DEFINITIONS, dispatchTool } from '../src/lib/llm/tools'
+import { TOOL_DEFINITIONS, dispatchTool, newTurn } from '../src/lib/llm/tools'
 import type { ChatMessage, ToolCall } from '../src/lib/llm/types'
 import type { ValidationResult } from '../src/lib/llm/validate'
 import { EVAL_CASES, type EvalCase } from './cases'
@@ -59,6 +59,8 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
   const tools: string[] = []
 
   let timedOut = false
+  // One per case, so the eval exercises the same automatic comparison the app does.
+  const turn = newTurn()
 
   /*
    * The deadline must abort generation already in flight, not merely be checked between rounds.
@@ -99,7 +101,7 @@ async function runCase(client: OllamaClient, testCase: EvalCase): Promise<CaseOu
     messages.push({ role: 'assistant', content: answer, tool_calls: calls })
     for (const call of calls) {
       tools.push(call.function.name)
-      const result = await dispatchTool(call.function.name, call.function.arguments ?? {})
+      const result = await dispatchTool(call.function.name, call.function.arguments ?? {}, { turn })
       // Keep the last circuit that validated, and the last that did not.
       if (result.circuit?.ok) circuit = result.circuit
       else if (result.circuit) rejected = result.circuit
